@@ -1,0 +1,14 @@
+{
+  "name": "openmemo",
+  "version": "0.1.0",
+  "description": "The Memory Operating System for AI Agents",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/allanyao/openmemo.git"
+  },
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "demo": "cd examples/memory_stress_test && python run_demo.py",
+    "benchmark": "python scripts/benchmark.py"
+  }
+}

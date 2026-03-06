@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  openmemo:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - openmemo_data:/app/data
+    environment:
+      - OPENMEMO_DB=/app/data/openmemo.db
+      - PORT=8080
+
+volumes:
+  openmemo_data:
