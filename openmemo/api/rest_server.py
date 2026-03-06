@@ -29,9 +29,32 @@ def create_app(db_path: str = None) -> Flask:
     store = SQLiteStore(db_path=db, check_same_thread=False)
     memory = Memory(db_path=db, store=store)
 
+    @app.route("/")
+    def index():
+        return jsonify({
+            "service": "OpenMemo API",
+            "version": "0.1.0",
+            "description": "The Memory Architecture for AI Systems",
+            "status": "running",
+            "docs": "https://openmemo.ai/docs",
+            "github": "https://github.com/openmemoai/openmemo",
+            "endpoints": {
+                "health": "GET /health",
+                "add_memory": "POST /api/memories",
+                "recall": "POST /api/memories/recall",
+                "reconstruct": "POST /api/memories/reconstruct",
+                "maintain": "POST /api/maintain",
+                "stats": "GET /api/stats",
+            },
+            "quickstart": {
+                "install": "pip install git+https://github.com/openmemoai/openmemo.git",
+                "example": 'curl -X POST https://api.openmemo.ai/api/memories -H "Content-Type: application/json" -d \'{"content": "User prefers dark mode"}\'',
+            },
+        })
+
     @app.route("/health")
     def health():
-        return jsonify({"status": "ok", "service": "openmemo"})
+        return jsonify({"status": "ok", "service": "openmemo", "version": "0.1.0"})
 
     @app.route("/api/memories", methods=["POST"])
     def add_memory():
