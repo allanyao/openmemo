@@ -14,7 +14,7 @@ We welcome bug reports, feature ideas, documentation improvements, and code cont
 ## Development Setup
 
 ```bash
-git clone https://github.com/allanyao/openmemo.git
+git clone https://github.com/openmemoai/openmemo.git
 cd openmemo
 pip install -e ".[dev]"
 ```

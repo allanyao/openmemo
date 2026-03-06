@@ -43,10 +43,10 @@ vector = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/allanyao/openmemo"
-Documentation = "https://github.com/allanyao/openmemo/tree/main/docs"
-Repository = "https://github.com/allanyao/openmemo"
-Issues = "https://github.com/allanyao/openmemo/issues"
+Homepage = "https://github.com/openmemoai/openmemo"
+Documentation = "https://github.com/openmemoai/openmemo/tree/main/docs"
+Repository = "https://github.com/openmemoai/openmemo"
+Issues = "https://github.com/openmemoai/openmemo/issues"
 
 [tool.setuptools.packages.find]
 include = ["openmemo*"]

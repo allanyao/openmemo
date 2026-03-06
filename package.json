@@ -4,7 +4,7 @@
   "description": "The Memory Operating System for AI Agents",
   "repository": {
     "type": "git",
-    "url": "https://github.com/allanyao/openmemo.git"
+    "url": "https://github.com/openmemoai/openmemo.git"
   },
   "license": "AGPL-3.0-or-later",
   "scripts": {

@@ -77,7 +77,7 @@ OpenMemo can power:
 Clone the repository:
 
 ```bash
-git clone https://github.com/allanyao/openmemo.git
+git clone https://github.com/openmemoai/openmemo.git
 ```
 
 Install dependencies:
