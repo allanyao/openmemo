@@ -12,12 +12,13 @@ import json
 import os
 
 try:
-    from flask import Flask, request, jsonify
+    from flask import Flask, request, jsonify, make_response
     from flask_cors import CORS
 except ImportError:
     raise ImportError("Install server dependencies: pip install openmemo[server]")
 
 from openmemo.api.sdk import Memory
+from openmemo.api.docs import API_DOCS_HTML
 
 
 def create_app(db_path: str = None) -> Flask:
@@ -36,7 +37,7 @@ def create_app(db_path: str = None) -> Flask:
             "version": "0.1.0",
             "description": "The Memory Architecture for AI Systems",
             "status": "running",
-            "docs": "https://openmemo.ai/docs",
+            "docs": "https://api.openmemo.ai/docs",
             "github": "https://github.com/openmemoai/openmemo",
             "endpoints": {
                 "health": "GET /health",
@@ -51,6 +52,12 @@ def create_app(db_path: str = None) -> Flask:
                 "example": 'curl -X POST https://api.openmemo.ai/api/memories -H "Content-Type: application/json" -d \'{"content": "User prefers dark mode"}\'',
             },
         })
+
+    @app.route("/docs")
+    def docs():
+        response = make_response(API_DOCS_HTML)
+        response.headers["Content-Type"] = "text/html"
+        return response
 
     @app.route("/health")
     def health():
