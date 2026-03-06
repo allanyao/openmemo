@@ -1,96 +1,36 @@
 # OpenMemo
 
-> OpenMemo is an AI-native structured memory system for long-term knowledge.
+OpenMemo gives AI systems long-term memory.
 
-Instead of storing notes as plain text, OpenMemo organizes information into structured data that AI systems can understand, retrieve, and reuse.
+OpenMemo is an open-source memory layer designed for AI agents, assistants, and AI-driven workflows.
+Instead of storing information as plain text, OpenMemo structures knowledge so AI systems can remember, resolve conflicts, and retrieve reliable facts over time.
 
 ---
 
 ## Why OpenMemo
 
-Most notes are written for humans.
+Most AI systems forget.
 
-But modern AI systems work best when knowledge is structured, contextual, and connected.
+Traditional prompts only hold temporary context. Once a session ends, information disappears or becomes inconsistent.
 
-OpenMemo helps transform everyday information into a structured memory layer that powers:
+OpenMemo solves this by providing a structured memory layer that allows AI systems to:
 
-- AI-assisted workflows
-- Knowledge retrieval
-- Research systems
-- Long-term memory
-- Automation pipelines
+- Store knowledge persistently
+- Resolve conflicting information
+- Recall updated facts
+- Build long-term contextual understanding
 
----
+**Without OpenMemo:**
+AI tools rely on short prompts and lose context quickly.
 
-## Architecture
-
-OpenMemo converts raw information into structured memory.
-
-```mermaid
-flowchart LR
-    A[Notes] --> E[Parsing Engine]
-    B[Documents] --> E
-    C[Web Clips] --> E
-    D[Conversations] --> E
-
-    E --> F[Entity Extraction]
-    F --> G[Structured Memory Model]
-
-    G --> H[Memory Store]
-    G --> I[Search Index]
-    G --> J[Knowledge Graph]
-
-    H --> K[AI Retrieval]
-    I --> K
-    J --> L[AI Assistants]
-    J --> M[Research Workflows]
-```
-
-OpenMemo transforms raw notes into structured memory AI can actually use.
+**With OpenMemo:**
+AI systems maintain structured memory that evolves over time.
 
 ---
 
-## Features
+## Demo
 
-- Structured note format
-- AI-ready knowledge storage
-- Context-aware search (BM25 + vector similarity)
-- Modular API architecture (Python SDK + REST)
-- AI integration ready
-- Memory Pyramid for automatic compression
-- Conflict detection and version management
-
----
-
-## Example Use Cases
-
-OpenMemo can power:
-
-- AI research assistants
-- Personal knowledge bases
-- Documentation systems
-- Memory layers for AI tools
-- Long-term note storage
-
----
-
-## Getting Started
-
-### Install from GitHub
-
-```bash
-pip install git+https://github.com/openmemoai/openmemo.git
-```
-
-### Or clone and install locally
-
-```bash
-git clone https://github.com/openmemoai/openmemo.git
-cd openmemo
-pip install -e ".[dev]"
-```
-
-### Quick example
+Below is a simple example showing how OpenMemo handles conflicting information and reconstructs the latest truth.
 
 ```python
 from openmemo import Memory
@@ -98,98 +38,150 @@ from openmemo import Memory
 memory = Memory()
 
 memory.add("User prefers dark mode")
-memory.add("Project deadline is March 15")
+memory.add("User changed preference to light mode")
 
-results = memory.recall("user preference")
-for r in results:
-    print(r["content"], r["score"])
+results = memory.recall("What theme does the user prefer?")
+print(results)
 ```
 
-### With vector search (optional)
-
-```python
-from openmemo import Memory
-
-def my_embed(text):
-    # Use any embedding model
-    return model.encode(text).tolist()
-
-memory = Memory(embed_fn=my_embed)
-memory.add("User prefers dark mode")
-results = memory.recall("UI preference")  # Uses both BM25 + vector similarity
+```
+Output:
+User preference: light mode
+(conflict resolved from newer memory)
 ```
 
-### REST Server
+OpenMemo automatically detects conflicts and keeps the most reliable version of the knowledge.
+
+---
+
+## Key Features
+
+- Structured memory storage for AI systems
+- Conflict-aware knowledge updates
+- Reliable memory recall
+- Lightweight API for AI workflows
+- Designed for AI agents and assistants
+
+---
+
+## Example Use Cases
+
+OpenMemo can power memory for many AI applications:
+
+- AI assistants that remember user preferences
+- Customer support agents with persistent context
+- Research tools that track evolving knowledge
+- AI workflows that require reliable memory
+
+---
+
+## Built with OpenMemo
+
+Example projects and cookbooks:
+
+```
+cookbooks/
+  ai-assistant/
+  customer-support/
+  coding-agent/
+```
+
+These examples show how OpenMemo can be used as the memory layer for real AI systems.
+
+---
+
+## Integrations
+
+OpenMemo is designed to work with existing AI frameworks.
+
+Planned and upcoming integrations include:
+
+- LangChain
+- LlamaIndex
+- Model Context Protocol (MCP)
+
+---
+
+## Getting Started
+
+Clone the repository:
 
 ```bash
-pip install openmemo[server]
-python -m openmemo.api.rest_server
+git clone https://github.com/openmemoai/openmemo.git
 ```
 
-```bash
-# Add a memory
-curl -X POST http://localhost:8080/api/memories \
-  -H "Content-Type: application/json" \
-  -d '{"content": "User prefers dark mode"}'
+Install dependencies:
 
-# Recall
-curl -X POST http://localhost:8080/api/memories/recall \
-  -H "Content-Type: application/json" \
-  -d '{"query": "user preference"}'
+```bash
+pip install -e .
 ```
 
-### Docker
+Run the example:
 
 ```bash
-cd docker
-docker compose up
+python examples/memory_stress_test/run_demo.py
+```
+
+---
+
+## Project Structure
+
+```
+openmemo/
+  core/          # Memory engine
+  storage/       # Storage backends
+  pyramid/       # Memory compression
+  skill/         # Skill extraction
+  governance/    # Conflict detection
+  api/           # SDK and REST server
+cookbooks/       # Usage examples
+docs/            # Architecture documentation
+examples/        # Demo scripts
 ```
 
 ---
 
 ## Roadmap
 
-Upcoming features:
+Upcoming development plans:
 
 - Knowledge graph visualization
-- AI summarization pipelines
-- Plugin system
-- External integrations
-- Distributed memory sync
+- Memory summarization
+- Advanced conflict resolution
+- Distributed memory systems
+- Agent-native memory APIs
 
 ---
 
 ## Contributing
 
-We welcome contributions from the community.
+We welcome community contributions.
 
-Please read the [CONTRIBUTING.md](CONTRIBUTING.md) file before submitting pull requests.
+Good areas for contribution include:
+
+- New integrations
+- Adapters for AI frameworks
+- Example cookbooks
+- Documentation improvements
+
+Core memory engine changes require review by the maintainers to maintain architectural consistency.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ---
 
 ## License
 
-OpenMemo is licensed under the **AGPLv3 License**.
+OpenMemo is released under the **AGPLv3 License**.
 
-This means:
+This allows anyone to use and modify the software, while ensuring that modifications deployed as a service remain open source.
 
-- You can use and modify the software.
-- If you deploy a modified version as a network service, the source code of those modifications must also be released.
-
-See the [LICENSE](LICENSE) file for details.
-
----
-
-## Trademark
-
-OpenMemo is a trademark of the project maintainers.
-
-Forks must not use the OpenMemo name or branding in a way that implies affiliation with the original project.
+See the [LICENSE](LICENSE) file for full details.
 
 ---
 
 ## Community
 
-If you are interested in building AI-native knowledge systems, OpenMemo aims to be a foundation for that ecosystem.
+OpenMemo is an early-stage project exploring long-term memory for AI systems.
 
-Stay tuned for updates and roadmap discussions.
+Feedback, ideas, and contributions are welcome.
