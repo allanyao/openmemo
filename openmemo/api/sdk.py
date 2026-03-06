@@ -12,7 +12,7 @@ Usage:
 
 import uuid
 import time
-from typing import List, Optional
+from typing import List, Optional, Callable
 
 from openmemo.core.memory import Note
 from openmemo.core.memcell import MemCell, LifecycleStage
@@ -20,6 +20,7 @@ from openmemo.core.scene import MemScene
 from openmemo.core.recall import RecallEngine
 from openmemo.core.reconstruct import ReconstructiveRecall
 from openmemo.storage.sqlite_store import SQLiteStore
+from openmemo.storage.vector_store import VectorStore
 from openmemo.pyramid.pyramid_engine import PyramidEngine
 from openmemo.pyramid.summarizer import Summarizer
 from openmemo.skill.skill_engine import SkillEngine
@@ -32,11 +33,24 @@ class Memory:
     The main entry point for OpenMemo.
 
     Provides a simple API for adding, recalling, and managing memories.
+
+    Args:
+        db_path: Path to SQLite database file. Default: "openmemo.db"
+        store: Custom storage backend (must implement BaseStore interface)
+        embed_fn: Optional embedding function for vector search.
+                  Should accept a string and return a list of floats.
+                  Example: lambda text: model.encode(text).tolist()
     """
 
-    def __init__(self, db_path: str = "openmemo.db", store=None):
+    def __init__(self, db_path: str = "openmemo.db", store=None, embed_fn: Callable = None):
         self.store = store or SQLiteStore(db_path)
-        self.recall_engine = RecallEngine(store=self.store)
+        self.embed_fn = embed_fn
+        self.vector_store = VectorStore() if embed_fn else None
+        self.recall_engine = RecallEngine(
+            store=self.store,
+            vector_store=self.vector_store,
+            embed_fn=self.embed_fn,
+        )
         self.reconstructor = ReconstructiveRecall(
             recall_engine=self.recall_engine,
             store=self.store,
@@ -67,6 +81,13 @@ class Memory:
 
         self.version_manager.snapshot(cell.to_dict(), change_type="create")
         self.store.put_cell(cell.to_dict())
+
+        if self.vector_store and self.embed_fn:
+            try:
+                embedding = self.embed_fn(content)
+                self.vector_store.add(cell.id, embedding, content)
+            except Exception:
+                pass
 
         return note.id
 
