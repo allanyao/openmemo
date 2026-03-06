@@ -1,123 +1,283 @@
 # OpenMemo
 
-OpenMemo gives AI systems long-term memory.
+**The Memory Architecture for AI Systems.**
 
-OpenMemo is an open-source memory layer designed for AI agents, assistants, and AI-driven workflows.
-Instead of storing information as plain text, OpenMemo structures knowledge so AI systems can remember, resolve conflicts, and retrieve reliable facts over time.
+Most AI memory systems today are just wrappers around vector databases.
 
-![OpenMemo Demo](docs/openmemo-demo.gif)
----
+OpenMemo is different.
 
-## Why OpenMemo
+Instead of storing memory as flat embeddings, OpenMemo introduces a structured memory architecture designed for long-running AI systems.
 
-Most AI systems forget.
+```
+MemCell → MemScene → Memory Pyramid → Reconstructive Recall
+```
 
-Traditional prompts only hold temporary context. Once a session ends, information disappears or becomes inconsistent.
-
-OpenMemo solves this by providing a structured memory layer that allows AI systems to:
-
-- Store knowledge persistently
-- Resolve conflicting information
-- Recall updated facts
-- Build long-term contextual understanding
-
-**Without OpenMemo:**
-AI tools rely on short prompts and lose context quickly.
-
-**With OpenMemo:**
-AI systems maintain structured memory that evolves over time.
+OpenMemo enables AI agents to remember, evolve, and reason over past experience — rather than simply retrieving text chunks.
 
 ---
 
-## Demo
+## Why Another Memory System?
 
-Below is a simple example showing how OpenMemo handles conflicting information and reconstructs the latest truth.
+Most AI memory systems today work like this:
+
+```
+Store → Embed → Similarity Search → Inject Context
+```
+
+This approach works for small contexts but breaks when AI systems run for long periods.
+
+Problems that appear in real systems:
+
+- Memory becomes noisy
+- Conflicting facts accumulate
+- Context windows explode
+- Past reasoning is lost
+- Experience cannot evolve
+
+OpenMemo was built to solve these problems.
+
+---
+
+## The OpenMemo Memory Model
+
+OpenMemo introduces a structured memory architecture.
+
+Instead of treating memory as documents, OpenMemo treats memory as **cognitive units**.
+
+```
+MemCell
+   ↓
+MemScene
+   ↓
+Memory Pyramid
+   ↓
+Reconstructive Recall
+```
+
+---
+
+## MemCell — Atomic Memory
+
+MemCell is the smallest unit of memory.
+
+Each memory is structured rather than stored as raw text.
+
+```
+type: preference
+subject: user
+object: PostgreSQL
+context: production database
+confidence: 0.92
+timestamp: 2026-01-01
+```
+
+MemCell allows the system to:
+
+- Detect conflicts
+- Update beliefs
+- Track evolution
+
+---
+
+## MemScene — Contextual Memory
+
+Memories rarely exist in isolation.
+
+OpenMemo groups related memories into **MemScenes**.
+
+```
+coding_scene
+research_scene
+project_scene
+```
+
+Scenes dramatically reduce retrieval noise and improve reasoning quality.
+
+---
+
+## Memory Pyramid — Hierarchical Memory
+
+Long-running systems accumulate huge amounts of data.
+
+OpenMemo organizes memory hierarchically:
+
+```
+L0  Profile Memory
+L1  Category Memory
+L2  Episodic Memory
+L3  Raw Events
+```
+
+This allows OpenMemo to load only the most relevant information.
+
+Benefits:
+
+- Reduces token usage
+- Faster recall
+- Better reasoning
+
+---
+
+## Reconstructive Recall
+
+Traditional memory systems simply retrieve text.
+
+OpenMemo does something different. It **reconstructs** memory.
+
+```
+retrieve → resolve → reconstruct
+```
+
+Instead of returning raw chunks, OpenMemo rebuilds a coherent narrative of past events.
+
+This enables AI systems to answer questions like:
+
+- *Why did we choose this approach earlier?*
+- *What caused the previous failure?*
+- *What solution worked last time?*
+
+---
+
+## Memory Governance
+
+Long-running AI systems suffer from memory entropy.
+
+OpenMemo introduces governance mechanisms to keep memory healthy:
+
+- Conflict detection
+- Memory evolution
+- Maintenance workers
+- Duplicate cleanup
+
+This ensures memory remains reliable over time.
+
+---
+
+## Quickstart
+
+Install OpenMemo:
+
+```bash
+pip install git+https://github.com/openmemoai/openmemo.git
+```
+
+Basic usage:
 
 ```python
 from openmemo import Memory
 
 memory = Memory()
 
-memory.add("User prefers dark mode")
-memory.add("User changed preference to light mode")
+memory.add("User prefers PostgreSQL for production")
 
-results = memory.recall("What theme does the user prefer?")
-print(results)
-```
+result = memory.recall("What database does the user prefer?")
 
+print(result)
 ```
-Output:
-User preference: light mode
-(conflict resolved from newer memory)
-```
-
-OpenMemo automatically detects conflicts and keeps the most reliable version of the knowledge.
 
 ---
 
-## Key Features
+## Example: Long-Running Agent
 
-- Structured memory storage for AI systems
-- Conflict-aware knowledge updates
-- Reliable memory recall
-- Lightweight API for AI workflows
-- Designed for AI agents and assistants
+OpenMemo enables agents to accumulate experience:
 
----
+```python
+memory.add("Bug fix: TypeError caused by missing config")
 
-## Example Use Cases
-
-OpenMemo can power memory for many AI applications:
-
-- AI assistants that remember user preferences
-- Customer support agents with persistent context
-- Research tools that track evolving knowledge
-- AI workflows that require reliable memory
-
----
-
-## Built with OpenMemo
-
-Example projects and cookbooks:
-
-```
-cookbooks/
-  ai-assistant/
-  customer-support/
-  coding-agent/
+# Over time, agents develop reusable knowledge
+skills = memory.maintain()
 ```
 
-These examples show how OpenMemo can be used as the memory layer for real AI systems.
+---
+
+## Architecture
+
+```
+Applications
+      │
+      ▼
+OpenMemo SDK
+      │
+      ▼
+OpenMemo Core
+  ├── MemCell Engine
+  ├── Scene Manager
+  ├── Memory Pyramid
+  ├── Recall Engine
+  ├── Reconstruct Engine
+  └── Governance Layer
+```
 
 ---
 
-## Integrations
+## Ecosystem
 
-OpenMemo is designed to work with existing AI frameworks.
+OpenMemo is designed to power a wide range of AI systems:
 
-Planned and upcoming integrations include:
+- AI agents
+- Developer copilots
+- Research assistants
+- Customer support systems
+- AI hardware devices
 
-- LangChain
-- LlamaIndex
-- Model Context Protocol (MCP)
+Adapters can be built for:
+
+- OpenClaw
+- LangGraph
+- CrewAI
+- Custom Agents
 
 ---
 
-## Getting Started
+## Comparison
+
+| | Vector DB | Chat History | **OpenMemo** |
+|---|---|---|---|
+| Structure | Flat embeddings | Flat log | **Hierarchical (MemCell + MemScene)** |
+| Conflict handling | None | None | **Automatic detection + resolution** |
+| Evolution | Append-only | Append-only | **Consolidate, promote, forget** |
+| Recall | Top-K similarity | Last N messages | **Tri-brain + reconstructive recall** |
+| Token control | Fixed window | Grows forever | **Pyramid auto-compression** |
+| Governance | None | None | **Built-in maintenance** |
+
+---
+
+## Use Cases
+
+OpenMemo is useful for systems that require long-term memory:
+
+- Long-running AI agents
+- Developer assistants
+- Research systems
+- Enterprise knowledge systems
+- AI hardware devices
+
+---
+
+## Examples
+
+See the `examples/` directory:
+
+```
+examples/
+  coding_agent_demo/
+  research_agent/
+  memory_stress_test/
+```
+
+---
+
+## Installation
 
 Clone the repository:
 
 ```bash
 git clone https://github.com/openmemoai/openmemo.git
-```
-
-Install dependencies:
-
-```bash
+cd openmemo
 pip install -e .
 ```
 
-Run the example:
+Run the demo:
 
 ```bash
 python examples/memory_stress_test/run_demo.py
@@ -125,32 +285,26 @@ python examples/memory_stress_test/run_demo.py
 
 ---
 
-## Project Structure
+## Philosophy
 
-```
-openmemo/
-  core/          # Memory engine
-  storage/       # Storage backends
-  pyramid/       # Memory compression
-  skill/         # Skill extraction
-  governance/    # Conflict detection
-  api/           # SDK and REST server
-cookbooks/       # Usage examples
-docs/            # Architecture documentation
-examples/        # Demo scripts
-```
+Memory is not storage.
+
+Memory is a **system**.
+
+To build reliable AI systems, we need more than vector databases.
+
+We need a **memory architecture**.
 
 ---
 
 ## Roadmap
 
-Upcoming development plans:
+Upcoming features:
 
-- Knowledge graph visualization
-- Memory summarization
-- Advanced conflict resolution
-- Distributed memory systems
-- Agent-native memory APIs
+- Agent adapters
+- Multi-agent memory
+- Memory governance dashboards
+- Hardware integrations
 
 ---
 
