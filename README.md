@@ -155,24 +155,10 @@ This ensures memory remains reliable over time.
 
 ## Quickstart
 
-### Option 1: Cloud API (no installation needed)
+### Option 1: Install from PyPI
 
 ```bash
-# Add a memory
-curl -X POST https://api.openmemo.ai/api/memories \
-  -H "Content-Type: application/json" \
-  -d '{"content": "User prefers PostgreSQL for production"}'
-
-# Recall
-curl -X POST https://api.openmemo.ai/api/memories/recall \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What database does the user prefer?"}'
-```
-
-### Option 2: Python SDK (local)
-
-```bash
-pip install git+https://github.com/openmemoai/openmemo.git
+pip install openmemo
 ```
 
 ```python
@@ -187,7 +173,27 @@ result = memory.recall("What database does the user prefer?")
 print(result)
 ```
 
-### Option 3: Self-hosted REST Server
+### Option 2: Cloud API (no installation needed)
+
+```bash
+# Add a memory
+curl -X POST https://api.openmemo.ai/api/memories \
+  -H "Content-Type: application/json" \
+  -d '{"content": "User prefers PostgreSQL for production"}'
+
+# Recall
+curl -X POST https://api.openmemo.ai/api/memories/recall \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What database does the user prefer?"}'
+```
+
+### Option 3: Install from GitHub
+
+```bash
+pip install git+https://github.com/openmemoai/openmemo.git
+```
+
+### Option 4: Self-hosted REST Server
 
 ```bash
 pip install "openmemo[server]"
