@@ -14,7 +14,7 @@ MemCell → MemScene → Memory Pyramid → Reconstructive Recall
 
 OpenMemo enables AI agents to remember, evolve, and reason over past experience — rather than simply retrieving text chunks.
 
-![OpenMemo Demo](docs/Memory-Pyramid-Demo.gif)
+![OpenMemo Demo](docs/openmemo-demo-ai.gif)
 
 ---
 
