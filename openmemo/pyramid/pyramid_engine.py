@@ -3,6 +3,7 @@ Memory Pyramid Engine.
 
 Three-tier memory compression with configurable parameters.
 Compression strategy is pluggable via CompressionStrategy interface.
+Tier boundaries and batch sizes are managed through PyramidConfig.
 """
 
 import time

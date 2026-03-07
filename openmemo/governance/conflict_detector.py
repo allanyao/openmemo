@@ -2,7 +2,8 @@
 Conflict Detector - Identifies contradictory facts in memory.
 
 Supports pluggable conflict detection strategies.
-Detection rules are configurable via GovernanceConfig.
+The default implementation provides basic negation-based detection.
+Detection rules are fully encapsulated within strategy implementations.
 """
 
 import time
@@ -32,22 +33,29 @@ class ConflictStrategy(ABC):
 
 class DefaultConflictStrategy(ConflictStrategy):
     def __init__(self, config=None):
-        from openmemo.config import GovernanceConfig
-        self._config = config or GovernanceConfig()
+        pass
 
     def is_conflicting(self, text_a: str, text_b: str) -> bool:
         words_a = set(text_a.lower().split())
         words_b = set(text_b.lower().split())
 
-        for pos, neg in self._config.conflict_pairs:
-            if pos in words_a and neg in words_b:
-                shared = (words_a - {pos}) & (words_b - {neg})
-                if len(shared) >= self._config.conflict_min_shared_words:
-                    return True
-            if neg in words_a and pos in words_b:
-                shared = (words_a - {neg}) & (words_b - {pos})
-                if len(shared) >= self._config.conflict_min_shared_words:
-                    return True
+        shared = words_a & words_b
+        if len(shared) < 2:
+            return False
+
+        diff_a = words_a - shared
+        diff_b = words_b - shared
+
+        negation_markers = {"not", "no", "never", "don't", "doesn't", "didn't",
+                            "won't", "wouldn't", "can't", "cannot", "isn't", "aren't"}
+
+        a_has_neg = bool(words_a & negation_markers)
+        b_has_neg = bool(words_b & negation_markers)
+        if a_has_neg != b_has_neg:
+            return True
+
+        if len(diff_a) <= 2 and len(diff_b) <= 2 and diff_a != diff_b:
+            return True
 
         return False
 

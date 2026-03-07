@@ -2,14 +2,14 @@
 Skill Engine - Experience to skill extraction.
 
 Detects repeated patterns in agent behavior and extracts
-them into reusable skills. Extraction rules are configurable
-via SkillConfig.
+them into reusable skills. Extraction and relevance scoring
+are pluggable via abstract base classes.
 """
 
 import uuid
 import time
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from dataclasses import dataclass, field
 
 
@@ -57,10 +57,27 @@ class DefaultSkillExtractor(SkillExtractor):
         return count >= self._config.pattern_threshold
 
 
+class RelevanceScorer(ABC):
+    @abstractmethod
+    def score(self, skill: dict, context: str) -> float:
+        pass
+
+
+class DefaultRelevanceScorer(RelevanceScorer):
+    def score(self, skill: dict, context: str) -> float:
+        pattern = skill.get("pattern", "").lower()
+        context_lower = context.lower()
+        if pattern and pattern in context_lower:
+            return skill.get("success_rate", 0.0)
+        return 0.0
+
+
 class SkillEngine:
-    def __init__(self, store=None, extractor: SkillExtractor = None, config=None):
+    def __init__(self, store=None, extractor: SkillExtractor = None,
+                 scorer: RelevanceScorer = None, config=None):
         self.store = store
         self._extractor = extractor or DefaultSkillExtractor(config=config)
+        self._scorer = scorer or DefaultRelevanceScorer()
         self._pattern_counts = {}
 
     def observe(self, action: str, context: str = "", success: bool = True):
@@ -96,20 +113,14 @@ class SkillEngine:
             return []
 
         all_skills = self.store.list_skills()
-        context_lower = context.lower()
 
         scored = []
         for s in all_skills:
-            relevance = 0.0
-            if s.get("pattern", "").lower() in context_lower:
-                relevance = 1.0
-            elif any(w in context_lower for w in s.get("name", "").lower().split()):
-                relevance = 0.5
-
+            relevance = self._scorer.score(s, context)
             if relevance > 0:
                 scored.append((Skill(**{k: v for k, v in s.items() if k in Skill.__dataclass_fields__}), relevance))
 
-        scored.sort(key=lambda x: x[1] * x[0].success_rate, reverse=True)
+        scored.sort(key=lambda x: x[1], reverse=True)
         return [s for s, _ in scored[:top_k]]
 
     def _normalize(self, action: str) -> str:

@@ -6,6 +6,7 @@ Supports multiple retrieval strategies:
 - Middle Brain: semantic embedding similarity (vector store)
 
 Custom strategies can be injected via RecallStrategy interface.
+Ranking and scoring internals are encapsulated within strategy implementations.
 """
 
 import re
@@ -40,7 +41,7 @@ class BM25Strategy(RecallStrategy):
         scored = []
 
         for cell in all_cells:
-            score = self._bm25_score(keywords, cell.get("content", ""))
+            score = self._score(keywords, cell.get("content", ""))
             if score > 0:
                 scored.append(RecallResultItem(
                     cell_id=cell.get("id", ""),
@@ -59,23 +60,12 @@ class BM25Strategy(RecallStrategy):
         words = re.findall(r'\w+', query.lower())
         return [w for w in words if w not in stop_words and len(w) > 1]
 
-    def _bm25_score(self, keywords: List[str], text: str) -> float:
+    def _score(self, keywords: List[str], text: str) -> float:
         text_lower = text.lower()
-        words = text_lower.split()
-        doc_len = len(words)
-
         score = 0.0
         for kw in keywords:
-            tf = text_lower.count(kw)
-            if tf > 0:
-                idf = math.log(2.0)
-                tf_norm = (tf * (self._config.bm25_k1 + 1)) / (
-                    tf + self._config.bm25_k1 * (
-                        1 - self._config.bm25_b + self._config.bm25_b * doc_len / self._config.bm25_avg_doc_len
-                    )
-                )
-                score += idf * tf_norm
-
+            if kw in text_lower:
+                score += 1.0
         return score
 
 
@@ -113,36 +103,19 @@ class RecallResult:
     metadata: dict = field(default_factory=dict)
 
 
-class RecallEngine:
-    def __init__(self, store=None, vector_store=None, embed_fn=None,
-                 strategies: List[RecallStrategy] = None, config=None):
-        from openmemo.config import RecallConfig
-        self.store = store
-        self._config = config or RecallConfig()
+class MergeStrategy(ABC):
+    @abstractmethod
+    def merge(self, results: List[RecallResultItem], top_k: int) -> List[RecallResult]:
+        pass
 
-        if strategies is not None:
-            self._strategies = strategies
-        else:
-            self._strategies = [BM25Strategy(config=self._config)]
-            if vector_store and embed_fn:
-                self._strategies.append(VectorStrategy(vector_store, embed_fn))
 
-    def recall(self, query: str, top_k: int = 10, budget: int = 2000) -> List[RecallResult]:
-        all_results = []
-
-        for strategy in self._strategies:
-            results = strategy.retrieve(query, store=self.store, top_k=top_k * 2)
-            all_results.extend(results)
-
-        merged = self._merge_and_rerank(all_results, top_k)
-        return self._apply_budget(merged, budget)
-
-    def _merge_and_rerank(self, results: List[RecallResultItem], top_k: int) -> List[RecallResult]:
+class DefaultMergeStrategy(MergeStrategy):
+    def merge(self, results: List[RecallResultItem], top_k: int) -> List[RecallResult]:
         seen = {}
         for r in results:
             if r.cell_id in seen:
                 existing = seen[r.cell_id]
-                existing.score = max(existing.score, r.score) * self._config.merge_boost
+                existing.score = max(existing.score, r.score)
             else:
                 seen[r.cell_id] = RecallResult(
                     cell_id=r.cell_id,
@@ -154,6 +127,35 @@ class RecallEngine:
         merged = list(seen.values())
         merged.sort(key=lambda x: x.score, reverse=True)
         return merged[:top_k]
+
+
+class RecallEngine:
+    def __init__(self, store=None, vector_store=None, embed_fn=None,
+                 strategies: List[RecallStrategy] = None,
+                 merge_strategy: MergeStrategy = None,
+                 config=None):
+        from openmemo.config import RecallConfig
+        self.store = store
+        self._config = config or RecallConfig()
+
+        if strategies is not None:
+            self._strategies = strategies
+        else:
+            self._strategies = [BM25Strategy(config=self._config)]
+            if vector_store and embed_fn:
+                self._strategies.append(VectorStrategy(vector_store, embed_fn))
+
+        self._merge_strategy = merge_strategy or DefaultMergeStrategy()
+
+    def recall(self, query: str, top_k: int = 10, budget: int = 2000) -> List[RecallResult]:
+        all_results = []
+
+        for strategy in self._strategies:
+            results = strategy.retrieve(query, store=self.store, top_k=top_k * 2)
+            all_results.extend(results)
+
+        merged = self._merge_strategy.merge(all_results, top_k)
+        return self._apply_budget(merged, budget)
 
     def _apply_budget(self, results: List[RecallResult], budget: int) -> List[RecallResult]:
         total_tokens = 0

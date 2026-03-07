@@ -33,7 +33,8 @@ class Memory:
     """
     The main entry point for OpenMemo.
 
-    Provides a simple API for adding, recalling, and managing memories.
+    Provides a simple API for adding, recalling, searching,
+    and managing memories.
 
     Args:
         db_path: Path to SQLite database file. Default: "openmemo.db"
@@ -79,6 +80,7 @@ class Memory:
             note_id=note.id,
             content=content,
             stage=LifecycleStage.EXPLORATION,
+            importance=self._config.evolution.default_importance,
         )
 
         existing_cells = self.store.list_cells(limit=50)
@@ -106,7 +108,7 @@ class Memory:
             cell = self.store.get_cell(r.cell_id)
             if cell:
                 cell_obj = MemCell.from_dict(cell)
-                cell_obj.access()
+                cell_obj.access(evolution_config=self._config.evolution)
                 self.store.put_cell(cell_obj.to_dict())
 
         return [
@@ -114,6 +116,17 @@ class Memory:
                 "content": r.content,
                 "score": r.score,
                 "source": r.source,
+                "cell_id": r.cell_id,
+            }
+            for r in results
+        ]
+
+    def search(self, query: str, top_k: int = 10) -> List[dict]:
+        results = self.recall_engine.recall(query, top_k=top_k, budget=50000)
+        return [
+            {
+                "content": r.content,
+                "score": r.score,
                 "cell_id": r.cell_id,
             }
             for r in results

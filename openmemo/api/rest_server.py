@@ -44,6 +44,7 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
                 "health": "GET /health",
                 "add_memory": "POST /api/memories",
                 "recall": "POST /api/memories/recall",
+                "search": "POST /api/memories/search",
                 "reconstruct": "POST /api/memories/reconstruct",
                 "maintain": "POST /api/maintain",
                 "stats": "GET /api/stats",
@@ -87,6 +88,18 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
             query=data["query"],
             top_k=data.get("top_k", 10),
             budget=data.get("budget", 2000),
+        )
+        return jsonify({"results": results})
+
+    @app.route("/api/memories/search", methods=["POST"])
+    def search():
+        data = request.get_json()
+        if not data or "query" not in data:
+            return jsonify({"error": "query is required"}), 400
+
+        results = memory.search(
+            query=data["query"],
+            top_k=data.get("top_k", 10),
         )
         return jsonify({"results": results})
 

@@ -6,6 +6,8 @@ A MemCell wraps an AtomicFact with:
 - Importance scoring
 - Embedding vector
 - Connection graph
+
+Evolution thresholds are configurable via EvolutionConfig.
 """
 
 import uuid
@@ -37,19 +39,22 @@ class MemCell:
     connections: list = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
 
-    def access(self):
+    def access(self, evolution_config=None):
         self.access_count += 1
         self.last_accessed = time.time()
-        self._update_stage()
+        self._update_stage(evolution_config)
 
-    def _update_stage(self):
-        if self.access_count >= 10 and self.importance >= 0.7:
+    def _update_stage(self, config=None):
+        from openmemo.config import EvolutionConfig
+        cfg = config or EvolutionConfig()
+
+        if self.access_count >= cfg.mastery_min_access and self.importance >= cfg.mastery_min_importance:
             self.stage = LifecycleStage.MASTERY
-        elif self.access_count >= 3:
+        elif self.access_count >= cfg.consolidation_min_access:
             self.stage = LifecycleStage.CONSOLIDATION
 
         age_days = (time.time() - self.last_accessed) / 86400
-        if age_days > 30 and self.stage != LifecycleStage.MASTERY:
+        if age_days > cfg.dormant_days and self.stage != LifecycleStage.MASTERY:
             self.stage = LifecycleStage.DORMANT
 
     def to_dict(self):
