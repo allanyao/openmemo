@@ -7,7 +7,6 @@ Zero configuration, works out of the box.
 
 import json
 import sqlite3
-import os
 from typing import List, Optional
 from openmemo.storage.base_store import BaseStore
 

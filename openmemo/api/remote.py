@@ -16,7 +16,7 @@ Install with:
     pip install openmemo[remote]
 """
 
-from typing import List, Optional, Union
+from typing import List
 
 try:
     import requests

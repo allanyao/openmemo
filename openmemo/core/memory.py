@@ -8,7 +8,6 @@ which are grouped into MemCells, which form MemScenes.
 import uuid
 import time
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass

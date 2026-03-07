@@ -17,7 +17,6 @@ Endpoints:
     POST /agent/context    — Get memory context for prompt injection
 """
 
-import json
 import os
 
 try:

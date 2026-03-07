@@ -16,13 +16,11 @@ Usage:
     mem.recall("Which language?")
 """
 
-import uuid
-import time
-from typing import List, Optional, Callable, Union
+from typing import List, Callable, Union
 
 from openmemo.config import OpenMemoConfig
 from openmemo.core.memory import Note
-from openmemo.core.memcell import MemCell, LifecycleStage, CellType
+from openmemo.core.memcell import MemCell, LifecycleStage
 from openmemo.core.scene import MemScene
 from openmemo.core.recall import RecallEngine
 from openmemo.core.reconstruct import ReconstructiveRecall

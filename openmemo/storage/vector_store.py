@@ -6,7 +6,7 @@ Default implementation uses numpy for basic cosine similarity.
 """
 
 import numpy as np
-from typing import List, Optional, Tuple
+from typing import List
 
 
 class VectorStore:

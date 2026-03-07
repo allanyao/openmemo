@@ -7,7 +7,7 @@ implementations and not exposed through this interface.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 
 @dataclass

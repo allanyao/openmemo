@@ -8,7 +8,7 @@ with conflict detection and annotation.
 
 import time
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List
 from dataclasses import dataclass, field
 
 

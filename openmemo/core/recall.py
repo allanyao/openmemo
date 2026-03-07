@@ -6,10 +6,8 @@ Custom strategies can be injected via RecallStrategy interface.
 """
 
 import re
-import math
-import time
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List
 from dataclasses import dataclass, field
 
 from openmemo.protocol.schemas import RecallResultItem

@@ -14,7 +14,7 @@ Evolution thresholds are encapsulated internally.
 import uuid
 import time
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Optional
 from enum import Enum
 
 
