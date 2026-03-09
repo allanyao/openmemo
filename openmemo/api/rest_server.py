@@ -12,6 +12,7 @@ Endpoints:
     POST /memory/governance  — Memory governance operations
     DELETE /memory/{id}      — Delete a memory
     POST /agent/context      — Get context for prompt injection
+    GET  /version            — Get version info
 """
 
 import os
@@ -27,7 +28,10 @@ from openmemo.api.docs import API_DOCS_HTML
 from openmemo.config import OpenMemoConfig
 
 API_VERSION = "1.0"
-ENGINE_VERSION = "0.4.0"
+ENGINE_VERSION = "0.5.0"
+SCHEMA_VERSION = "2"
+CORE_VERSION = "0.5.0"
+ADAPTER_VERSION = "2.1.0"
 
 
 def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
@@ -58,6 +62,7 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
                 "delete": "DELETE /memory/{id}",
                 "context": "POST /agent/context",
                 "health": "GET /health",
+                "version": "GET /version",
                 "stats": "GET /api/stats",
             },
         })
@@ -67,6 +72,14 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
         response = make_response(API_DOCS_HTML)
         response.headers["Content-Type"] = "text/html"
         return response
+
+    @app.route("/version")
+    def version():
+        return jsonify({
+            "latest_core": CORE_VERSION,
+            "latest_adapter": ADAPTER_VERSION,
+            "schema_version": SCHEMA_VERSION,
+        })
 
     @app.route("/health")
     def health():
