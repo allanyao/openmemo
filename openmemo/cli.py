@@ -26,8 +26,8 @@ def main():
     subparsers = parser.add_subparsers(dest="command")
 
     serve_parser = subparsers.add_parser("serve", help="Start the OpenMemo API server")
-    serve_parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8080)))
-    serve_parser.add_argument("--host", type=str, default="0.0.0.0")
+    serve_parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8765)))
+    serve_parser.add_argument("--host", type=str, default="127.0.0.1")
     serve_parser.add_argument("--db", type=str, default=os.environ.get("OPENMEMO_DB", "openmemo.db"))
 
     subparsers.add_parser("version", help="Show installed version info")
