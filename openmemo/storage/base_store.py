@@ -85,6 +85,18 @@ class BaseStore(ABC):
     def list_conversations(self, agent_id: str = None) -> List[dict]:
         return []
 
+    def put_edge(self, edge: dict) -> str:
+        return edge.get("edge_id", "")
+
+    def get_edges(self, memory_id: str) -> List[dict]:
+        return []
+
+    def delete_edge(self, edge_id: str) -> bool:
+        return False
+
+    def list_edges(self, limit: int = 100) -> List[dict]:
+        return []
+
     @abstractmethod
     def close(self):
         pass

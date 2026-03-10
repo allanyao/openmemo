@@ -61,6 +61,9 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
                 "scenes": "GET /memory/scenes",
                 "governance": "POST /memory/governance",
                 "delete": "DELETE /memory/{id}",
+                "graph": "GET /memory/graph?memory_id=X",
+                "edges": "GET/POST /memory/edges",
+                "conflicts": "GET /memory/conflicts",
                 "context": "POST /agent/context",
                 "health": "GET /health",
                 "version": "GET /version",
@@ -228,6 +231,41 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
     def promote_shared():
         result = memory.promote_shared_memories()
         return jsonify(result)
+
+    @app.route("/memory/graph", methods=["GET"])
+    def memory_graph():
+        memory_id = request.args.get("memory_id", "")
+        if not memory_id:
+            return jsonify({"error": "memory_id is required"}), 400
+        depth = request.args.get("depth", 1, type=int)
+        result = memory.get_memory_graph(memory_id, depth=depth)
+        return jsonify(result)
+
+    @app.route("/memory/edges", methods=["POST"])
+    def add_edge():
+        data = request.get_json()
+        if not data or "memory_a" not in data or "memory_b" not in data:
+            return jsonify({"error": "memory_a and memory_b are required"}), 400
+        edge = memory.add_memory_edge(
+            memory_a=data["memory_a"],
+            memory_b=data["memory_b"],
+            relation_type=data.get("relation_type", "related"),
+            confidence=data.get("confidence", 0.7),
+        )
+        return jsonify(edge), 201
+
+    @app.route("/memory/edges", methods=["GET"])
+    def list_edges():
+        limit = request.args.get("limit", 100, type=int)
+        edges = memory.list_edges(limit=limit)
+        return jsonify({"edges": edges})
+
+    @app.route("/memory/conflicts", methods=["GET"])
+    def get_conflicts():
+        agent_id = request.args.get("agent_id", "")
+        scene = request.args.get("scene", "")
+        conflicts = memory.detect_conflicts(agent_id=agent_id, scene=scene)
+        return jsonify({"conflicts": conflicts})
 
     @app.route("/memory/<memory_id>", methods=["DELETE"])
     def delete_memory(memory_id):

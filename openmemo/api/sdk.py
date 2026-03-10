@@ -21,6 +21,7 @@ from openmemo.core.memcell import MemCell, LifecycleStage
 from openmemo.core.scene import MemScene
 from openmemo.core.recall import RecallEngine
 from openmemo.core.reconstruct import ReconstructiveRecall
+from openmemo.core.graph import GraphBuilder, get_memory_graph, detect_conflicts
 from openmemo.storage.sqlite_store import SQLiteStore
 from openmemo.storage.vector_store import VectorStore
 from openmemo.pyramid.pyramid_engine import PyramidEngine
@@ -90,6 +91,8 @@ class Memory:
         )
         self.version_manager = VersionManager()
         self._registry = ConstitutionRegistry()
+        self.graph_builder = GraphBuilder(store=self.store)
+        self._auto_graph = True
 
     # ─── Constitution Profile API ───
 
@@ -155,7 +158,8 @@ class Memory:
 
     def recall_context(self, query: str, scene: str = "",
                        agent_id: str = "", limit: int = 5,
-                       mode: str = "kv", conversation_id: str = "") -> dict:
+                       mode: str = "kv", conversation_id: str = "",
+                       graph: bool = None) -> dict:
         if mode == "narrative":
             result = self.reconstructor.reconstruct(
                 query, max_sources=limit,
@@ -179,6 +183,7 @@ class Memory:
             query, top_k=limit, budget=2000,
             agent_id=agent_id or None, scene=scene or None,
             conversation_id=conversation_id or None,
+            graph=graph,
         )
 
         for r in results:
@@ -273,6 +278,40 @@ class Memory:
                 decayed += 1
         return {"decayed": decayed}
 
+    # ─── Memory Graph API ───
+
+    def add_memory_edge(self, memory_a: str, memory_b: str,
+                        relation_type: str = "related",
+                        confidence: float = 0.7) -> dict:
+        import uuid
+        import time as _time
+        edge = {
+            "edge_id": str(uuid.uuid4())[:12],
+            "memory_a": memory_a,
+            "memory_b": memory_b,
+            "relation_type": relation_type,
+            "confidence": confidence,
+            "created_at": _time.time(),
+            "metadata": {},
+        }
+        self.store.put_edge(edge)
+        return edge
+
+    def get_memory_graph(self, memory_id: str, depth: int = 1) -> dict:
+        resolved_id = self._resolve_memory_id(memory_id)
+        return get_memory_graph(self.store, resolved_id, depth=depth)
+
+    def detect_conflicts(self, agent_id: str = "",
+                         scene: str = "") -> List[dict]:
+        return detect_conflicts(
+            self.store,
+            agent_id=agent_id or None,
+            scene=scene or None,
+        )
+
+    def list_edges(self, limit: int = 100) -> List[dict]:
+        return self.store.list_edges(limit=limit)
+
     # ─── Backward-compatible aliases ───
 
     def write(self, content: str, agent_id: str = "", scene: str = "",
@@ -347,11 +386,17 @@ class Memory:
         cells = self.store.list_cells(limit=10000)
         scenes_list = self.store.list_scenes(limit=10000)
         skills = self.store.list_skills()
+        edges = self.store.list_edges(limit=10000)
 
         stage_counts = {}
         for c in cells:
             stage = c.get("stage", "unknown")
             stage_counts[stage] = stage_counts.get(stage, 0) + 1
+
+        edge_type_counts = {}
+        for e in edges:
+            rt = e.get("relation_type", "unknown")
+            edge_type_counts[rt] = edge_type_counts.get(rt, 0) + 1
 
         conflicts = self.conflict_detector.get_unresolved()
 
@@ -360,9 +405,21 @@ class Memory:
             "cells": len(cells),
             "scenes": len(scenes_list),
             "skills": len(skills),
+            "edges": len(edges),
+            "edge_types": edge_type_counts,
             "stages": stage_counts,
             "unresolved_conflicts": len(conflicts),
         }
+
+    def _resolve_memory_id(self, memory_id: str) -> str:
+        cell = self.store.get_cell(memory_id)
+        if cell:
+            return memory_id
+        cells = self.store.list_cells(limit=500)
+        for c in cells:
+            if c.get("note_id") == memory_id:
+                return c["id"]
+        return memory_id
 
     # ─── Internal implementations ───
 
@@ -433,6 +490,12 @@ class Memory:
             try:
                 embedding = self.embed_fn(content)
                 self.vector_store.add(cell.id, embedding, content)
+            except Exception:
+                pass
+
+        if self._auto_graph:
+            try:
+                self.graph_builder.build_edges(cell.id, store=self.store)
             except Exception:
                 pass
 
@@ -551,6 +614,15 @@ class Memory:
         shared_result = self.promote_shared_memories()
         decay_result = self.decay_shared_memories()
 
+        orphaned_edges = 0
+        all_edges = self.store.list_edges(limit=1000)
+        for edge in all_edges:
+            cell_a = self.store.get_cell(edge["memory_a"])
+            cell_b = self.store.get_cell(edge["memory_b"])
+            if not cell_a or not cell_b:
+                self.store.delete_edge(edge["edge_id"])
+                orphaned_edges += 1
+
         return {
             "operation": "cleanup",
             "duplicates_removed": dedupe_result["duplicates_removed"],
@@ -559,6 +631,7 @@ class Memory:
             "promoted": promoted,
             "shared_promoted": shared_result["promoted"],
             "shared_decayed": decay_result["decayed"],
+            "orphaned_edges_removed": orphaned_edges,
             "total_cells": len(remaining_cells),
         }
 

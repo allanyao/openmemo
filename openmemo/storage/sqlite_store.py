@@ -1,8 +1,8 @@
 """
 SQLite storage backend - the default store.
 
-Stores notes, MemCells, MemScenes, skills, agents, and conversations
-in a local SQLite database. Zero configuration, works out of the box.
+Stores notes, MemCells, MemScenes, skills, agents, conversations,
+and memory edges in a local SQLite database. Zero configuration, works out of the box.
 """
 
 import json
@@ -97,6 +97,16 @@ class SQLiteStore(BaseStore):
                 agent_id TEXT DEFAULT '',
                 scene TEXT DEFAULT '',
                 started_at REAL,
+                metadata TEXT DEFAULT '{}'
+            );
+
+            CREATE TABLE IF NOT EXISTS memory_edges (
+                edge_id TEXT PRIMARY KEY,
+                memory_a TEXT NOT NULL,
+                memory_b TEXT NOT NULL,
+                relation_type TEXT NOT NULL,
+                confidence REAL DEFAULT 0.5,
+                created_at REAL,
                 metadata TEXT DEFAULT '{}'
             );
         """)
@@ -357,8 +367,53 @@ class SQLiteStore(BaseStore):
             "metadata": json.loads(row["metadata"] or "{}"),
         } for row in cursor.fetchall()]
 
+    def put_edge(self, edge: dict) -> str:
+        edge_id = edge.get("edge_id", "")
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """INSERT OR REPLACE INTO memory_edges
+            (edge_id, memory_a, memory_b, relation_type, confidence, created_at, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (edge_id, edge.get("memory_a", ""), edge.get("memory_b", ""),
+             edge.get("relation_type", "related"), edge.get("confidence", 0.5),
+             edge.get("created_at", time.time()),
+             json.dumps(edge.get("metadata", {})))
+        )
+        self.conn.commit()
+        return edge_id
+
+    def get_edges(self, memory_id: str) -> List[dict]:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT * FROM memory_edges WHERE memory_a = ? OR memory_b = ?",
+            (memory_id, memory_id)
+        )
+        return [self._row_to_edge(row) for row in cursor.fetchall()]
+
+    def delete_edge(self, edge_id: str) -> bool:
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM memory_edges WHERE edge_id = ?", (edge_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def list_edges(self, limit: int = 100) -> List[dict]:
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM memory_edges ORDER BY created_at DESC LIMIT ?", (limit,))
+        return [self._row_to_edge(row) for row in cursor.fetchall()]
+
     def close(self):
         self.conn.close()
+
+    def _row_to_edge(self, row) -> dict:
+        return {
+            "edge_id": row["edge_id"],
+            "memory_a": row["memory_a"],
+            "memory_b": row["memory_b"],
+            "relation_type": row["relation_type"],
+            "confidence": row["confidence"],
+            "created_at": row["created_at"],
+            "metadata": json.loads(row["metadata"] or "{}"),
+        }
 
     def _row_to_note(self, row) -> dict:
         d = {
