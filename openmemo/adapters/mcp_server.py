@@ -2,7 +2,7 @@
 MCP Transport Server for OpenMemo.
 
 Implements the Model Context Protocol (JSON-RPC 2.0) transport layer,
-wrapping OpenMemoMCPServer with stdio and SSE transports.
+wrapping OpenMemoMCPServer with stdio, SSE, and Streamable HTTP transports.
 
 Supports all MCP-compatible clients:
 - Claude Desktop, Claude Code, claude.ai (Remote MCP)
@@ -12,12 +12,15 @@ Supports all MCP-compatible clients:
 - Replit, Sourcegraph, Qodo, Raycast
 - ChatGPT (Developer Mode)
 
-Usage (stdio):
+Usage (stdio — local CLI & IDE clients):
     openmemo mcp serve
     python -m openmemo.adapters.mcp_server
 
-Usage (SSE):
+Usage (SSE — legacy remote clients):
     openmemo mcp serve --transport sse --port 8780
+
+Usage (Streamable HTTP — claude.ai Remote MCP, production):
+    openmemo mcp serve --transport http --port 8780
 
 Client config (claude_desktop_config.json / mcp.json):
     {
@@ -410,6 +413,173 @@ def run_sse(host: str = "127.0.0.1", port: int = 8780,
         mcp.close()
 
 
+class _StreamableHTTPHandler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        logger.debug("HTTP: %s", format % args)
+
+    def _check_auth(self) -> bool:
+        token = self.server._auth_token
+        if not token:
+            return True
+        auth_header = self.headers.get("Authorization", "")
+        if auth_header == f"Bearer {token}":
+            return True
+        self._respond_json(401, {"error": "unauthorized"})
+        return False
+
+    def do_GET(self):
+        if self.path == "/health":
+            self._respond_json(200, {
+                "status": "ok",
+                "server": SERVER_NAME,
+                "version": SERVER_VERSION,
+                "transport": "streamable-http",
+            })
+        else:
+            self._respond_json(404, {"error": "not found"})
+
+    def do_POST(self):
+        if self.path == "/mcp":
+            if not self._check_auth():
+                return
+            self._handle_mcp()
+        else:
+            self._respond_json(404, {"error": "not found"})
+
+    def _handle_mcp(self):
+        content_type = self.headers.get("Content-Type", "")
+        if "application/json" not in content_type:
+            self._respond_json(415, {"error": "Content-Type must be application/json"})
+            return
+
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+
+        try:
+            request = json.loads(body)
+        except json.JSONDecodeError:
+            self._respond_json(400, {
+                "jsonrpc": "2.0", "id": None,
+                "error": {"code": -32700, "message": "Parse error"},
+            })
+            return
+
+        session_id = self.headers.get("Mcp-Session-Id", "")
+
+        if not session_id:
+            if isinstance(request, dict) and request.get("method") == "initialize":
+                session_id = str(uuid.uuid4())
+                with self.server._lock:
+                    self.server._sessions[session_id] = {"initialized": {"done": False}}
+            else:
+                with self.server._lock:
+                    if self.server._sessions:
+                        session_id = next(iter(self.server._sessions))
+                    else:
+                        session_id = str(uuid.uuid4())
+                        self.server._sessions[session_id] = {"initialized": {"done": True}}
+
+        with self.server._lock:
+            session = self.server._sessions.get(session_id, {"initialized": {"done": True}})
+
+        if isinstance(request, list):
+            responses = []
+            for req in request:
+                resp = _handle_jsonrpc(req, self.server._mcp, session.get("initialized", {"done": True}))
+                if resp is not None:
+                    responses.append(resp)
+            if responses:
+                self._respond_mcp(200, responses if len(responses) > 1 else responses[0], session_id)
+            else:
+                self.send_response(202)
+                self.send_header("Mcp-Session-Id", session_id)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+        else:
+            response = _handle_jsonrpc(request, self.server._mcp, session.get("initialized", {"done": True}))
+            if response is not None:
+                self._respond_mcp(200, response, session_id)
+            else:
+                self.send_response(202)
+                self.send_header("Mcp-Session-Id", session_id)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+
+    def _respond_mcp(self, status, data, session_id):
+        body = json.dumps(data, ensure_ascii=False).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Mcp-Session-Id", session_id)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Expose-Headers", "Mcp-Session-Id")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Session-Id")
+        self.send_header("Access-Control-Expose-Headers", "Mcp-Session-Id")
+        self.end_headers()
+
+    def do_DELETE(self):
+        if self.path == "/mcp":
+            session_id = self.headers.get("Mcp-Session-Id", "")
+            if session_id:
+                with self.server._lock:
+                    self.server._sessions.pop(session_id, None)
+            self.send_response(200)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+        else:
+            self._respond_json(404, {"error": "not found"})
+
+    def _respond_json(self, status, data):
+        body = json.dumps(data).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def run_http(host: str = "127.0.0.1", port: int = 8780,
+             db_path: str = "openmemo.db", agent_id: str = "",
+             auth_token: str = None):
+    mcp = _build_mcp_server(db_path, agent_id)
+
+    server = _ThreadingHTTPServer((host, port), _StreamableHTTPHandler)
+    server._mcp = mcp
+    server._sessions = {}
+    server._lock = threading.Lock()
+    server._auth_token = auth_token or os.environ.get("OPENMEMO_MCP_TOKEN", "")
+
+    print(f"OpenMemo MCP Server (Streamable HTTP) running on http://{host}:{port}")
+    print(f"  MCP endpoint:     POST http://{host}:{port}/mcp")
+    print(f"  Health check:     GET  http://{host}:{port}/health")
+    print(f"  Database:         {db_path}")
+    print()
+    print(f"  For claude.ai Remote MCP:")
+    print(f"    1. Expose publicly: cloudflared tunnel --url http://localhost:{port}")
+    print(f"    2. Add connector in claude.ai Settings -> Connectors")
+    if server._auth_token:
+        print(f"  Auth:             Bearer token required")
+    else:
+        if host != "127.0.0.1" and host != "localhost":
+            print(f"  WARNING: No auth token set. Set OPENMEMO_MCP_TOKEN for security.")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+    finally:
+        server.server_close()
+        mcp.close()
+
+
 def main():
     import argparse
 
@@ -418,23 +588,26 @@ def main():
         description="OpenMemo MCP Server — Memory for any AI client",
     )
     parser.add_argument(
-        "--transport", choices=["stdio", "sse"], default="stdio",
-        help="Transport mode (default: stdio)",
+        "--transport", choices=["stdio", "sse", "http"], default="stdio",
+        help="Transport mode: stdio (default), sse (legacy remote), http (streamable HTTP for claude.ai)",
     )
-    parser.add_argument("--host", default="127.0.0.1", help="SSE server host")
-    parser.add_argument("--port", type=int, default=8780, help="SSE server port")
+    parser.add_argument("--host", default="127.0.0.1", help="Server host")
+    parser.add_argument("--port", type=int, default=8780, help="Server port")
     parser.add_argument(
         "--db", default=os.environ.get("OPENMEMO_DB", "openmemo.db"),
         help="Database path",
     )
     parser.add_argument("--agent-id", default="", help="Agent identifier")
-    parser.add_argument("--token", default="", help="Auth token for SSE mode")
+    parser.add_argument("--token", default="", help="Auth token for remote modes")
 
     args = parser.parse_args()
 
     if args.transport == "sse":
         run_sse(host=args.host, port=args.port, db_path=args.db,
                 agent_id=args.agent_id, auth_token=args.token)
+    elif args.transport == "http":
+        run_http(host=args.host, port=args.port, db_path=args.db,
+                 agent_id=args.agent_id, auth_token=args.token)
     else:
         run_stdio(db_path=args.db, agent_id=args.agent_id)
 

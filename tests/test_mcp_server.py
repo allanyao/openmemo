@@ -310,3 +310,165 @@ class TestFullWorkflow:
         }, mcp, state)
         data = json.loads(search_resp["result"]["content"][0]["text"])
         assert "results" in data
+
+
+class TestStreamableHTTP:
+    @pytest.fixture(autouse=True)
+    def setup_server(self):
+        import threading
+        import time
+        from urllib.request import Request, urlopen
+        from openmemo.adapters.mcp_server import _ThreadingHTTPServer, _StreamableHTTPHandler
+
+        mem = Memory(db_path=":memory:")
+        mcp_inst = OpenMemoMCPServer(memory=mem, agent_id="http_test")
+
+        self.server = _ThreadingHTTPServer(("127.0.0.1", 0), _StreamableHTTPHandler)
+        self.server._mcp = mcp_inst
+        self.server._sessions = {}
+        self.server._lock = threading.Lock()
+        self.server._auth_token = ""
+        self.port = self.server.server_address[1]
+        self.base_url = f"http://127.0.0.1:{self.port}"
+
+        self.thread = threading.Thread(target=self.server.serve_forever)
+        self.thread.daemon = True
+        self.thread.start()
+        time.sleep(0.1)
+
+        yield
+
+        self.server.shutdown()
+        self.server.server_close()
+
+    def _post(self, path, data, headers=None):
+        from urllib.request import Request, urlopen
+        body = json.dumps(data).encode()
+        req = Request(f"{self.base_url}{path}", data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        if headers:
+            for k, v in headers.items():
+                req.add_header(k, v)
+        with urlopen(req, timeout=5) as resp:
+            resp_headers = dict(resp.headers)
+            return json.loads(resp.read()), resp.status, resp_headers
+
+    def _get(self, path):
+        from urllib.request import Request, urlopen
+        req = Request(f"{self.base_url}{path}")
+        with urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read()), resp.status
+
+    def test_health_check(self):
+        data, status = self._get("/health")
+        assert status == 200
+        assert data["status"] == "ok"
+        assert data["transport"] == "streamable-http"
+
+    def test_initialize(self):
+        data, status, headers = self._post("/mcp", {
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"capabilities": {}},
+        })
+        assert status == 200
+        assert data["result"]["serverInfo"]["name"] == "openmemo"
+        assert "Mcp-Session-Id" in headers
+
+    def test_full_session(self):
+        init_data, _, headers = self._post("/mcp", {
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"capabilities": {}},
+        })
+        session_id = headers.get("Mcp-Session-Id", "")
+        assert session_id
+
+        tools_data, _, _ = self._post("/mcp", {
+            "jsonrpc": "2.0", "id": 2, "method": "tools/list",
+        }, {"Mcp-Session-Id": session_id})
+        assert len(tools_data["result"]["tools"]) == 4
+
+        write_data, _, _ = self._post("/mcp", {
+            "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+            "params": {
+                "name": "write_memory",
+                "arguments": {"content": "Streamable HTTP works great"},
+            },
+        }, {"Mcp-Session-Id": session_id})
+        result = json.loads(write_data["result"]["content"][0]["text"])
+        assert result["status"] == "stored"
+
+        recall_data, _, _ = self._post("/mcp", {
+            "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+            "params": {
+                "name": "recall_memory",
+                "arguments": {"query": "Streamable HTTP"},
+            },
+        }, {"Mcp-Session-Id": session_id})
+        recall_result = json.loads(recall_data["result"]["content"][0]["text"])
+        assert "context" in recall_result
+
+    def test_wrong_content_type(self):
+        from urllib.request import Request, urlopen
+        from urllib.error import HTTPError
+        req = Request(f"{self.base_url}/mcp", data=b'{}', method="POST")
+        req.add_header("Content-Type", "text/plain")
+        try:
+            urlopen(req, timeout=5)
+            assert False
+        except HTTPError as e:
+            assert e.code == 415
+
+    def test_invalid_json(self):
+        from urllib.request import Request, urlopen
+        from urllib.error import HTTPError
+        req = Request(f"{self.base_url}/mcp", data=b'not json', method="POST")
+        req.add_header("Content-Type", "application/json")
+        try:
+            urlopen(req, timeout=5)
+            assert False
+        except HTTPError as e:
+            assert e.code == 400
+
+    def test_auth_required(self):
+        import threading
+        from urllib.request import Request, urlopen
+        from urllib.error import HTTPError
+        from openmemo.adapters.mcp_server import _ThreadingHTTPServer, _StreamableHTTPHandler
+
+        auth_server = _ThreadingHTTPServer(("127.0.0.1", 0), _StreamableHTTPHandler)
+        auth_server._mcp = self.server._mcp
+        auth_server._sessions = {}
+        auth_server._lock = threading.Lock()
+        auth_server._auth_token = "test-secret-token"
+        auth_port = auth_server.server_address[1]
+
+        t = threading.Thread(target=auth_server.serve_forever)
+        t.daemon = True
+        t.start()
+
+        try:
+            req = Request(
+                f"http://127.0.0.1:{auth_port}/mcp",
+                data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}).encode(),
+                method="POST",
+            )
+            req.add_header("Content-Type", "application/json")
+            try:
+                urlopen(req, timeout=5)
+                assert False
+            except HTTPError as e:
+                assert e.code == 401
+
+            req2 = Request(
+                f"http://127.0.0.1:{auth_port}/mcp",
+                data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}).encode(),
+                method="POST",
+            )
+            req2.add_header("Content-Type", "application/json")
+            req2.add_header("Authorization", "Bearer test-secret-token")
+            with urlopen(req2, timeout=5) as resp:
+                data = json.loads(resp.read())
+                assert data["result"]["serverInfo"]["name"] == "openmemo"
+        finally:
+            auth_server.shutdown()
+            auth_server.server_close()

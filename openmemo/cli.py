@@ -60,8 +60,8 @@ def main():
     mcp_sub = mcp_parser.add_subparsers(dest="mcp_command")
     mcp_serve = mcp_sub.add_parser("serve", help="Start MCP server")
     mcp_serve.add_argument(
-        "--transport", choices=["stdio", "sse"], default="stdio",
-        help="Transport mode (default: stdio)",
+        "--transport", choices=["stdio", "sse", "http"], default="stdio",
+        help="Transport mode: stdio (default), sse (legacy), http (streamable HTTP for claude.ai)",
     )
     mcp_serve.add_argument("--host", default="127.0.0.1", help="SSE host (SSE mode only)")
     mcp_serve.add_argument("--port", type=int, default=8780, help="SSE port (SSE mode only)")
@@ -257,10 +257,17 @@ def _cmd_mcp(args):
         print("Usage: openmemo mcp serve [--transport stdio|sse] [--port PORT] [--db DB_PATH]")
         return
 
-    from openmemo.adapters.mcp_server import run_stdio, run_sse
+    from openmemo.adapters.mcp_server import run_stdio, run_sse, run_http
 
     if args.transport == "sse":
         run_sse(
+            host=args.host,
+            port=args.port,
+            db_path=args.db,
+            agent_id=getattr(args, "agent_id", ""),
+        )
+    elif args.transport == "http":
+        run_http(
             host=args.host,
             port=args.port,
             db_path=args.db,
