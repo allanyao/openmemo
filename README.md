@@ -196,6 +196,41 @@ Instead of returning raw chunks, OpenMemo reconstructs coherent narratives with 
 
 Conflict detection, memory evolution, maintenance workers, and duplicate cleanup.
 
+### Cognitive Constitution
+
+OpenMemo is governed by a **Constitution** — a policy layer that defines how memory is stored, ranked, reconciled, and evolved.
+
+The Constitution is defined in two files:
+- [`constitution.md`](openmemo/constitution/constitution.md) — human-readable policy document
+- `constitution.json` — machine-readable configuration
+
+It controls six dimensions of memory behavior:
+
+| Policy | What it governs |
+|--------|----------------|
+| **Memory Philosophy** | What to store vs. filter as noise |
+| **Priority Policy** | Ranking order: decision > constraint > fact > preference > observation > conversation |
+| **Recall Policy** | Prefer scene-local, recent, high-confidence memories |
+| **Conflict Policy** | Auto-resolve when confidence gap ≥ 0.15 |
+| **Retention Policy** | Transient conversation decays fast; reinforced memories persist |
+| **Promotion Policy** | Requires ≥ 2 occurrences + 1 success signal to promote to stable knowledge |
+
+The Constitution is loaded at startup and wired into the write pipeline, recall engine, conflict detector, and governance worker — making OpenMemo a **policy-driven cognitive memory system**.
+
+```python
+from openmemo import Memory
+
+memory = Memory()
+
+# Constitution is active by default
+# Noise is filtered automatically
+memory.write_memory("hi")  # → "" (filtered)
+memory.write_memory("Use PostgreSQL for production", memory_type="decision")  # → stored with priority boost
+
+# Recall is constitution-aware (scene-local priority, confidence ranking)
+result = memory.recall_context("database", scene="infra")
+```
+
 ---
 
 ## Architecture
@@ -208,13 +243,14 @@ OpenMemo SDK (Memory class)
       │
       ▼
 OpenMemo Core
+  ├── Constitution (cognitive policy layer)
   ├── MemCell Engine (typed cells, lifecycle, evolution)
   ├── Scene Manager (auto-detection, grouping)
-  ├── Recall Engine (BM25 + Vector, hybrid retrieval)
+  ├── Recall Engine (BM25 + Vector, constitution-aware ranking)
   ├── Reconstruct Engine (narrative + conflict annotation)
   ├── Memory Pyramid (hierarchical compression)
   ├── Skill Engine (pattern extraction)
-  └── Governance Layer (conflict detection, versioning)
+  └── Governance Layer (conflict detection, promotion, versioning)
       │
       ▼
 Storage (SQLite default, pluggable)
@@ -244,6 +280,7 @@ Storage (SQLite default, pluggable)
 | `POST` | `/memory/reconstruct` | Reconstruct narrative |
 | `POST` | `/api/maintain` | Run maintenance |
 | `GET` | `/api/stats` | Get statistics |
+| `GET` | `/constitution` | Get constitution summary |
 | `GET` | `/health` | Health check |
 | `GET` | `/docs` | API documentation |
 
