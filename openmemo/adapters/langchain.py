@@ -4,8 +4,6 @@ LangChain Adapter for OpenMemo.
 Provides OpenMemoMemory() that works as a LangChain
 BaseMemory compatible memory backend.
 
-Supports both local SDK and remote API modes.
-
 Usage (local):
     from openmemo.adapters.langchain import OpenMemoMemory
     memory = OpenMemoMemory(agent_id="my_agent")
@@ -19,25 +17,15 @@ Usage (remote):
 """
 
 from typing import Any, Dict, List
+from openmemo.adapters.base_adapter import BaseMemoryAdapter
 
 
-class OpenMemoMemory:
-    memory_key: str = "history"
+class OpenMemoMemory(BaseMemoryAdapter):
+    adapter_name = "langchain"
 
-    def __init__(self, db_path: str = "openmemo.db", agent_id: str = "",
-                 memory=None, memory_key: str = "history",
-                 base_url: str = None, api_key: str = None):
-        self.agent_id = agent_id
+    def __init__(self, memory_key: str = "history", **kwargs):
+        super().__init__(**kwargs)
         self.memory_key = memory_key
-
-        if memory:
-            self._memory = memory
-        elif base_url:
-            from openmemo.api.remote import RemoteMemory
-            self._memory = RemoteMemory(base_url=base_url, api_key=api_key)
-        else:
-            from openmemo.api.sdk import Memory
-            self._memory = Memory(db_path=db_path)
 
     @property
     def memory_variables(self) -> List[str]:
@@ -48,13 +36,7 @@ class OpenMemoMemory:
         if not query:
             return {self.memory_key: ""}
 
-        result = self._memory.recall_context(
-            query=query,
-            agent_id=self.agent_id,
-            limit=5,
-            mode="kv",
-        )
-
+        result = self.recall_context(query=query, limit=5)
         context = result.get("context", [])
         if not context:
             return {self.memory_key: ""}
@@ -66,24 +48,18 @@ class OpenMemoMemory:
         ai_output = outputs.get("output", "")
 
         if user_input:
-            self._memory.write_memory(
+            self.write_memory(
                 content=f"User: {user_input}",
                 scene="conversation",
                 memory_type="observation",
-                agent_id=self.agent_id,
             )
 
         if ai_output:
-            self._memory.write_memory(
+            self.write_memory(
                 content=f"Assistant: {ai_output}",
                 scene="conversation",
                 memory_type="observation",
-                agent_id=self.agent_id,
             )
 
     def clear(self) -> None:
         pass
-
-    def close(self):
-        if hasattr(self._memory, 'close'):
-            self._memory.close()
