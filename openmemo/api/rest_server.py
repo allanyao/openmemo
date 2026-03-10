@@ -29,10 +29,10 @@ from openmemo.api.inspector_html import INSPECTOR_HTML
 from openmemo.config import OpenMemoConfig
 
 API_VERSION = "1.0"
-ENGINE_VERSION = "0.6.0"
+ENGINE_VERSION = "0.7.0"
 SCHEMA_VERSION = "2"
-CORE_VERSION = "0.6.0"
-ADAPTER_VERSION = "2.2.0"
+CORE_VERSION = "0.7.0"
+ADAPTER_VERSION = "2.4.0"
 
 
 def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
@@ -154,6 +154,12 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
         result = memory.memory_governance(operation=operation)
         return jsonify(result)
 
+    @app.route("/constitution", methods=["GET"])
+    def get_constitution():
+        if memory.constitution:
+            return jsonify(memory.constitution.summary())
+        return jsonify({"error": "constitution not enabled"}), 404
+
     @app.route("/memory/<memory_id>", methods=["DELETE"])
     def delete_memory(memory_id):
         deleted = memory.delete(memory_id)
@@ -233,6 +239,11 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
             checks.append({"name": "Memory Recall Working", "status": "fail"})
 
         checks.append({"name": "Task Memory & Deduplication Active", "status": "ok"})
+
+        if memory.constitution:
+            checks.append({"name": "Constitution Active", "status": "ok"})
+        else:
+            checks.append({"name": "Constitution Active", "status": "warning"})
 
         return jsonify({"checks": checks})
 

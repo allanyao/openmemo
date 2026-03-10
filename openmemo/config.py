@@ -7,7 +7,7 @@ implementations and not exposed through this interface.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 
 @dataclass
@@ -39,12 +39,19 @@ class EvolutionConfig:
 
 
 @dataclass
+class ConstitutionConfigRef:
+    enabled: bool = True
+    path: Optional[str] = None
+
+
+@dataclass
 class OpenMemoConfig:
     recall: RecallConfig = field(default_factory=RecallConfig)
     governance: GovernanceConfig = field(default_factory=GovernanceConfig)
     evolution: EvolutionConfig = field(default_factory=EvolutionConfig)
     pyramid: PyramidConfig = field(default_factory=PyramidConfig)
     skill: SkillConfig = field(default_factory=SkillConfig)
+    constitution: ConstitutionConfigRef = field(default_factory=ConstitutionConfigRef)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "OpenMemoConfig":
@@ -55,6 +62,7 @@ class OpenMemoConfig:
             "evolution": config.evolution,
             "pyramid": config.pyramid,
             "skill": config.skill,
+            "constitution": config.constitution,
         }
         for section_name, section_obj in section_map.items():
             if section_name in data:

@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OpenMemo Constitution",
+  "type": "object",
+  "required": ["version", "memory_philosophy", "priority_policy", "recall_policy", "conflict_policy", "retention_policy", "promotion_policy"],
+  "properties": {
+    "version": {
+      "type": "string"
+    },
+    "memory_philosophy": {
+      "type": "object",
+      "properties": {
+        "store_meaning_not_noise": { "type": "boolean" },
+        "prefer_durable_knowledge": { "type": "boolean" },
+        "prefer_structured_memory": { "type": "boolean" }
+      }
+    },
+    "priority_policy": {
+      "type": "object",
+      "properties": {
+        "order": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["order"]
+    },
+    "recall_policy": {
+      "type": "object",
+      "properties": {
+        "prefer_scene_local": { "type": "boolean" },
+        "prefer_recent_high_confidence": { "type": "boolean" },
+        "prefer_coherent_sets": { "type": "boolean" },
+        "default_mode": { "type": "string", "enum": ["kv", "raw", "narrative"] }
+      }
+    },
+    "conflict_policy": {
+      "type": "object",
+      "properties": {
+        "prefer_newer_memory": { "type": "boolean" },
+        "min_confidence_gap_for_override": { "type": "number", "minimum": 0, "maximum": 1 },
+        "allow_unresolved_conflict": { "type": "boolean" }
+      }
+    },
+    "retention_policy": {
+      "type": "object",
+      "properties": {
+        "decay_transient_conversation": { "type": "boolean" },
+        "decay_low_confidence_first": { "type": "boolean" },
+        "reinforced_memories_decay_slower": { "type": "boolean" }
+      }
+    },
+    "promotion_policy": {
+      "type": "object",
+      "properties": {
+        "require_reinforcement": { "type": "boolean" },
+        "minimum_occurrences": { "type": "integer", "minimum": 1 },
+        "minimum_success_signals": { "type": "integer", "minimum": 0 },
+        "promote_one_off_anecdotes": { "type": "boolean" }
+      }
+    }
+  }
+}

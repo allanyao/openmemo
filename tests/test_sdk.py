@@ -182,8 +182,8 @@ class TestMemoryOperations:
         assert deleted is True
 
     def test_stats(self, memory):
-        memory.write_memory("one")
-        memory.write_memory("two")
+        memory.write_memory("First meaningful memory entry")
+        memory.write_memory("Second meaningful memory entry")
         stats = memory.stats()
         assert stats["notes"] == 2
         assert stats["cells"] == 2

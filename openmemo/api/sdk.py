@@ -28,6 +28,8 @@ from openmemo.pyramid.summarizer import Summarizer
 from openmemo.skill.skill_engine import SkillEngine
 from openmemo.governance.conflict_detector import ConflictDetector
 from openmemo.governance.version_manager import VersionManager
+from openmemo.constitution.constitution_loader import load_constitution
+from openmemo.constitution.constitution_runtime import ConstitutionRuntime
 
 
 class Memory:
@@ -54,6 +56,13 @@ class Memory:
         self.store = store or SQLiteStore(db_path)
         self.embed_fn = embed_fn
         self.vector_store = VectorStore() if embed_fn else None
+
+        if self._config.constitution.enabled:
+            constitution_config = load_constitution(self._config.constitution.path)
+            self.constitution = ConstitutionRuntime(constitution_config)
+        else:
+            self.constitution = None
+
         self.recall_engine = RecallEngine(
             store=self.store,
             vector_store=self.vector_store,
@@ -128,10 +137,17 @@ class Memory:
                 ),
             }
 
+        effective_scene = scene
+        if not effective_scene and self.constitution and self.constitution.should_prefer_scene_local():
+            effective_scene = scene
+
         results = self.recall_engine.recall(
             query, top_k=limit, budget=2000,
-            agent_id=agent_id or None, scene=scene or None,
+            agent_id=agent_id or None, scene=effective_scene or None,
         )
+
+        if self.constitution and self.constitution.should_prefer_recent_high_confidence():
+            results = self._boost_by_constitution(results)
 
         for r in results:
             cell = self.store.get_cell(r.cell_id)
@@ -259,10 +275,30 @@ class Memory:
 
     # ─── Internal implementations ───
 
+    def _boost_by_constitution(self, results) -> list:
+        import time
+        now = time.time()
+        boosted = []
+        for r in results:
+            cell = self.store.get_cell(r.cell_id)
+            if cell:
+                age_days = (now - cell.get("created_at", now)) / 86400
+                confidence = cell.get("metadata", {}).get("confidence", 0.5)
+                recency_boost = max(0, 1.0 - (age_days / 30))
+                confidence_boost = confidence * 0.1
+                priority_boost = self.constitution.get_priority(cell.get("cell_type", "fact")) * 0.02
+                r.score += recency_boost * 0.1 + confidence_boost + priority_boost
+            boosted.append(r)
+        boosted.sort(key=lambda x: x.score, reverse=True)
+        return boosted
+
     def _write_impl(self, content: str, scene: str, cell_type: str,
                     confidence: float, agent_id: str,
                     source: str, metadata: dict) -> str:
         from openmemo._internal import get_evolution_params
+
+        if self.constitution and not self.constitution.should_store(cell_type, content):
+            return ""
 
         note = Note(content=content, source=source, metadata=metadata or {})
         note_dict = note.to_dict()
@@ -271,6 +307,11 @@ class Memory:
         self.store.put_note(note_dict)
 
         importance = confidence if confidence else get_evolution_params()["default_importance"]
+
+        if self.constitution:
+            priority = self.constitution.get_priority(cell_type)
+            importance = min(1.0, importance + priority * 0.02)
+
         cell = MemCell(
             note_id=note.id,
             content=content,
@@ -284,7 +325,22 @@ class Memory:
 
         existing_cells = self.store.list_cells(limit=50, agent_id=agent_id or None)
         conflicts = self.conflict_detector.detect(cell.to_dict(), existing_cells)
-        if conflicts:
+        if conflicts and self.constitution:
+            for conflict in conflicts:
+                old_cell = next(
+                    (c for c in existing_cells if c.get("id") == conflict.cell_id_b),
+                    None,
+                )
+                old_conf = old_cell.get("metadata", {}).get("confidence", 0.5) if old_cell else 0.5
+                if self.constitution.allow_conflict_override(old_conf, confidence):
+                    cell.metadata["conflict_resolved"] = "override"
+                elif self.constitution.allow_unresolved_conflict():
+                    cell.metadata["has_conflicts"] = True
+                    cell.metadata["conflict_count"] = len(conflicts)
+                else:
+                    cell.metadata["has_conflicts"] = True
+                    cell.metadata["conflict_count"] = len(conflicts)
+        elif conflicts:
             cell.metadata["has_conflicts"] = True
             cell.metadata["conflict_count"] = len(conflicts)
 
@@ -375,7 +431,15 @@ class Memory:
             age_days = (now - last_access) / 86400
             if age_days > 30:
                 cell_obj = MemCell.from_dict(c)
-                cell_obj.importance = max(0.1, cell_obj.importance * 0.9)
+                if self.constitution:
+                    factor = self.constitution.get_decay_factor(
+                        cell_obj.cell_type,
+                        confidence=c.get("metadata", {}).get("confidence", 0.5),
+                        access_count=cell_obj.access_count,
+                    )
+                else:
+                    factor = 0.9
+                cell_obj.importance = max(0.1, cell_obj.importance * factor)
                 self.store.put_cell(cell_obj.to_dict())
                 decayed += 1
         return {
