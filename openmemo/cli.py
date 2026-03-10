@@ -3,6 +3,7 @@ OpenMemo CLI - Command line interface.
 
 Usage:
     openmemo serve [--port PORT] [--db DB_PATH]
+    openmemo mcp serve [--transport stdio|sse] [--port PORT] [--db DB_PATH]
     openmemo version
     openmemo check-update
     openmemo upgrade
@@ -55,6 +56,21 @@ def main():
     search_parser.add_argument("query", type=str, help="Search query")
     search_parser.add_argument("--port", type=int, default=8765)
 
+    mcp_parser = subparsers.add_parser("mcp", help="MCP server commands")
+    mcp_sub = mcp_parser.add_subparsers(dest="mcp_command")
+    mcp_serve = mcp_sub.add_parser("serve", help="Start MCP server")
+    mcp_serve.add_argument(
+        "--transport", choices=["stdio", "sse"], default="stdio",
+        help="Transport mode (default: stdio)",
+    )
+    mcp_serve.add_argument("--host", default="127.0.0.1", help="SSE host (SSE mode only)")
+    mcp_serve.add_argument("--port", type=int, default=8780, help="SSE port (SSE mode only)")
+    mcp_serve.add_argument(
+        "--db", type=str, default=os.environ.get("OPENMEMO_DB", "openmemo.db"),
+        help="Database path",
+    )
+    mcp_serve.add_argument("--agent-id", default="", help="Agent identifier")
+
     args = parser.parse_args()
 
     if args.command == "serve":
@@ -75,6 +91,8 @@ def main():
         _cmd_memory(args)
     elif args.command == "search":
         _cmd_search(args)
+    elif args.command == "mcp":
+        _cmd_mcp(args)
     else:
         parser.print_help()
 
@@ -232,6 +250,27 @@ def _cmd_search(args):
             meta.append(f"score={score:.2f}" if isinstance(score, float) else f"score={score}")
         if meta:
             print(f"     [{', '.join(meta)}]")
+
+
+def _cmd_mcp(args):
+    if not hasattr(args, "mcp_command") or args.mcp_command != "serve":
+        print("Usage: openmemo mcp serve [--transport stdio|sse] [--port PORT] [--db DB_PATH]")
+        return
+
+    from openmemo.adapters.mcp_server import run_stdio, run_sse
+
+    if args.transport == "sse":
+        run_sse(
+            host=args.host,
+            port=args.port,
+            db_path=args.db,
+            agent_id=getattr(args, "agent_id", ""),
+        )
+    else:
+        run_stdio(
+            db_path=args.db,
+            agent_id=getattr(args, "agent_id", ""),
+        )
 
 
 def _api_get(port, path):
