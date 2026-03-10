@@ -70,10 +70,15 @@ class ConstitutionRuntime:
             return False
 
         gap = new_confidence - old_confidence
-        if gap >= 0:
+        threshold = self._config.conflict_policy.min_confidence_gap_for_override
+
+        if gap >= threshold:
             return True
 
-        return abs(gap) <= self._config.conflict_policy.min_confidence_gap_for_override
+        if gap >= 0 and gap < threshold:
+            return False
+
+        return False
 
     def allow_unresolved_conflict(self) -> bool:
         return self._config.conflict_policy.allow_unresolved_conflict

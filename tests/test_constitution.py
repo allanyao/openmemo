@@ -148,14 +148,17 @@ class TestConstitutionRuntime:
     def test_allow_conflict_override_low_confidence(self, runtime):
         assert runtime.allow_conflict_override(0.9, 0.5) is False
 
-    def test_allow_conflict_override_close(self, runtime):
-        assert runtime.allow_conflict_override(0.7, 0.6) is True
+    def test_allow_conflict_override_small_gap_rejected(self, runtime):
+        assert runtime.allow_conflict_override(0.7, 0.8) is False
 
     def test_allow_conflict_override_much_lower(self, runtime):
         assert runtime.allow_conflict_override(0.9, 0.3) is False
 
     def test_allow_conflict_override_equal(self, runtime):
-        assert runtime.allow_conflict_override(0.7, 0.7) is True
+        assert runtime.allow_conflict_override(0.7, 0.7) is False
+
+    def test_allow_conflict_override_above_threshold(self, runtime):
+        assert runtime.allow_conflict_override(0.5, 0.7) is True
 
     def test_allow_unresolved_conflict(self, runtime):
         assert runtime.allow_unresolved_conflict() is True
@@ -334,6 +337,26 @@ class TestConflictDetectorConstitution:
         assert len(conflicts) == 1
         assert conflicts[0].resolved is True
         assert conflicts[0].resolution == "constitution_override"
+
+    def test_conflict_not_auto_resolved_small_gap(self):
+        from openmemo.governance.conflict_detector import ConflictDetector
+        rt = ConstitutionRuntime()
+        detector = ConflictDetector(constitution=rt)
+        new_cell = {
+            "id": "cell_new",
+            "content": "Python is fast",
+            "metadata": {"confidence": 0.6},
+        }
+        existing = [
+            {
+                "id": "cell_old",
+                "content": "Python is not fast",
+                "metadata": {"confidence": 0.55},
+            },
+        ]
+        conflicts = detector.detect(new_cell, existing)
+        assert len(conflicts) == 1
+        assert conflicts[0].resolved is False
 
     def test_conflict_not_auto_resolved_low_confidence(self):
         from openmemo.governance.conflict_detector import ConflictDetector

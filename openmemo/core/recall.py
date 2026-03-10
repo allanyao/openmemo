@@ -181,11 +181,12 @@ class RecallEngine:
                 )
                 all_results.extend(results)
 
-        merged = self._merge_strategy.merge(all_results, top_k)
+        merged = self._merge_strategy.merge(all_results, top_k * 3)
 
         if self._constitution:
             merged = self._apply_constitution_ranking(merged)
 
+        merged = merged[:top_k]
         return self._apply_budget(merged, budget)
 
     def _apply_constitution_ranking(self, results: List[RecallResult]) -> List[RecallResult]:
