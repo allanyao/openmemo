@@ -1,9 +1,12 @@
 """Tests for OpenMemo MCP Transport Server."""
+import io
 import json
 import pytest
 from openmemo.api.sdk import Memory
 from openmemo.adapters.mcp import OpenMemoMCPServer
-from openmemo.adapters.mcp_server import _handle_jsonrpc, _build_mcp_server
+from openmemo.adapters.mcp_server import (
+    _handle_jsonrpc, _validate_jsonrpc, _read_message, _write_message,
+)
 
 
 @pytest.fixture
@@ -14,23 +17,63 @@ def mcp():
 
 @pytest.fixture
 def state():
+    return {"done": True}
+
+
+@pytest.fixture
+def uninit_state():
     return {"done": False}
 
 
-class TestInitialize:
-    def test_initialize_response(self, mcp, state):
-        req = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+class TestValidation:
+    def test_missing_jsonrpc(self, mcp, state):
+        req = {"id": 1, "method": "ping"}
         resp = _handle_jsonrpc(req, mcp, state)
+        assert resp["error"]["code"] == -32600
+
+    def test_wrong_jsonrpc_version(self, mcp, state):
+        req = {"jsonrpc": "1.0", "id": 1, "method": "ping"}
+        resp = _handle_jsonrpc(req, mcp, state)
+        assert resp["error"]["code"] == -32600
+
+    def test_not_a_dict(self, mcp, state):
+        resp = _handle_jsonrpc("not a dict", mcp, state)
+        assert resp["error"]["code"] == -32600
+
+    def test_validate_jsonrpc_valid(self):
+        result = _validate_jsonrpc({"jsonrpc": "2.0", "method": "ping"})
+        assert result is None
+
+
+class TestInitialization:
+    def test_initialize_response(self, mcp, uninit_state):
+        req = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+        resp = _handle_jsonrpc(req, mcp, uninit_state)
         assert resp["id"] == 1
         result = resp["result"]
         assert result["protocolVersion"] == "2024-11-05"
         assert "tools" in result["capabilities"]
         assert result["serverInfo"]["name"] == "openmemo"
-        assert state["done"] is True
+        assert uninit_state["done"] is True
 
     def test_initialized_notification(self, mcp, state):
         req = {"jsonrpc": "2.0", "method": "notifications/initialized"}
         resp = _handle_jsonrpc(req, mcp, state)
+        assert resp is None
+
+    def test_pre_initialize_gating(self, mcp, uninit_state):
+        req = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        resp = _handle_jsonrpc(req, mcp, uninit_state)
+        assert resp["error"]["code"] == -32002
+
+    def test_ping_before_initialize(self, mcp, uninit_state):
+        req = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+        resp = _handle_jsonrpc(req, mcp, uninit_state)
+        assert resp["result"] == {}
+
+    def test_notifications_before_initialize(self, mcp, uninit_state):
+        req = {"jsonrpc": "2.0", "method": "notifications/something"}
+        resp = _handle_jsonrpc(req, mcp, uninit_state)
         assert resp is None
 
 
@@ -132,7 +175,7 @@ class TestToolsCall:
         data = json.loads(resp["result"]["content"][0]["text"])
         assert "scenes" in data
 
-    def test_unknown_tool(self, mcp, state):
+    def test_unknown_tool_returns_error_flag(self, mcp, state):
         req = {
             "jsonrpc": "2.0", "id": 9, "method": "tools/call",
             "params": {
@@ -143,6 +186,7 @@ class TestToolsCall:
         resp = _handle_jsonrpc(req, mcp, state)
         data = json.loads(resp["result"]["content"][0]["text"])
         assert "error" in data
+        assert resp["result"]["isError"] is True
 
 
 class TestErrorHandling:
@@ -157,13 +201,62 @@ class TestErrorHandling:
         assert resp is None
 
 
+class TestStdioFraming:
+    def test_read_message(self):
+        body = '{"jsonrpc":"2.0","id":1,"method":"ping"}'
+        encoded = body.encode("utf-8")
+        raw = f"Content-Length: {len(encoded)}\r\n\r\n{body}"
+        stream = io.BytesIO(raw.encode("utf-8"))
+        result = _read_message(stream)
+        assert result == body
+        parsed = json.loads(result)
+        assert parsed["method"] == "ping"
+
+    def test_write_message(self):
+        output = io.StringIO()
+        response = {"jsonrpc": "2.0", "id": 1, "result": {}}
+        _write_message(output, response)
+        written = output.getvalue()
+        assert "Content-Length:" in written
+        parts = written.split("\r\n\r\n", 1)
+        assert len(parts) == 2
+        header_line = parts[0]
+        body = parts[1]
+        assert json.loads(body) == response
+        expected_len = len(body.encode("utf-8"))
+        assert f"Content-Length: {expected_len}" in header_line
+
+    def test_read_message_no_content_length(self):
+        stream = io.BytesIO(b"\r\n")
+        result = _read_message(stream)
+        assert result is None
+
+    def test_read_message_empty_stream(self):
+        stream = io.BytesIO(b"")
+        result = _read_message(stream)
+        assert result is None
+
+    def test_roundtrip(self):
+        original = {"jsonrpc": "2.0", "id": 42, "result": {"tools": []}}
+        output = io.StringIO()
+        _write_message(output, original)
+        written = output.getvalue()
+
+        input_stream = io.BytesIO(written.encode("utf-8"))
+        read_back = _read_message(input_stream)
+        assert json.loads(read_back) == original
+
+
 class TestFullWorkflow:
-    def test_complete_mcp_session(self, mcp, state):
+    def test_complete_mcp_session(self, mcp):
+        state = {"done": False}
+
         init = _handle_jsonrpc(
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
             mcp, state,
         )
         assert init["result"]["serverInfo"]["name"] == "openmemo"
+        assert state["done"] is True
 
         _handle_jsonrpc(
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
