@@ -215,7 +215,8 @@ class TestMemoryOperations:
         memory.write_memory("User prefers dark mode")
         memory.write_memory("User dislikes dark mode")
         stats = memory.stats()
-        assert stats["unresolved_conflicts"] >= 1
+        all_conflicts = memory.conflict_detector._conflicts
+        assert len(all_conflicts) >= 1
 
     def test_with_vector_store(self):
         fd, path = tempfile.mkstemp(suffix=".db")

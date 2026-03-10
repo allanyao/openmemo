@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "memory_philosophy": {
+    "store_meaning_not_noise": false,
+    "prefer_durable_knowledge": false,
+    "prefer_structured_memory": false
+  },
+  "priority_policy": {
+    "order": [
+      "observation",
+      "preference",
+      "fact",
+      "decision",
+      "constraint",
+      "conversation"
+    ]
+  },
+  "recall_policy": {
+    "prefer_scene_local": false,
+    "prefer_recent_high_confidence": false,
+    "prefer_coherent_sets": false,
+    "default_mode": "kv"
+  },
+  "conflict_policy": {
+    "prefer_newer_memory": true,
+    "min_confidence_gap_for_override": 0.3,
+    "allow_unresolved_conflict": true
+  },
+  "retention_policy": {
+    "decay_transient_conversation": false,
+    "decay_low_confidence_first": false,
+    "reinforced_memories_decay_slower": true
+  },
+  "promotion_policy": {
+    "require_reinforcement": false,
+    "minimum_occurrences": 1,
+    "minimum_success_signals": 0,
+    "promote_one_off_anecdotes": true
+  }
+}

@@ -130,10 +130,11 @@ class RecallEngine:
     def __init__(self, store=None, vector_store=None, embed_fn=None,
                  strategies: List[RecallStrategy] = None,
                  merge_strategy: MergeStrategy = None,
-                 config=None):
+                 config=None, constitution=None):
         from openmemo.config import RecallConfig
         self.store = store
         self._config = config or RecallConfig()
+        self._constitution = constitution
 
         if strategies is not None:
             self._strategies = strategies
@@ -144,19 +145,69 @@ class RecallEngine:
 
         self._merge_strategy = merge_strategy or DefaultMergeStrategy()
 
+    def set_constitution(self, constitution):
+        self._constitution = constitution
+
     def recall(self, query: str, top_k: int = 10, budget: int = 2000,
                agent_id: str = None, scene: str = None) -> List[RecallResult]:
         all_results = []
 
-        for strategy in self._strategies:
-            results = strategy.retrieve(
-                query, store=self.store, top_k=top_k * 2,
-                agent_id=agent_id, scene=scene,
-            )
-            all_results.extend(results)
+        if self._constitution and self._constitution.should_prefer_scene_local() and scene:
+            for strategy in self._strategies:
+                results = strategy.retrieve(
+                    query, store=self.store, top_k=top_k * 2,
+                    agent_id=agent_id, scene=scene,
+                )
+                all_results.extend(results)
+
+            if len(all_results) < top_k:
+                global_results = []
+                for strategy in self._strategies:
+                    results = strategy.retrieve(
+                        query, store=self.store, top_k=top_k * 2,
+                        agent_id=agent_id, scene=None,
+                    )
+                    global_results.extend(results)
+                seen_ids = {r.cell_id for r in all_results}
+                for r in global_results:
+                    if r.cell_id not in seen_ids:
+                        r.score *= 0.8
+                        all_results.append(r)
+        else:
+            for strategy in self._strategies:
+                results = strategy.retrieve(
+                    query, store=self.store, top_k=top_k * 2,
+                    agent_id=agent_id, scene=scene,
+                )
+                all_results.extend(results)
 
         merged = self._merge_strategy.merge(all_results, top_k)
+
+        if self._constitution:
+            merged = self._apply_constitution_ranking(merged)
+
         return self._apply_budget(merged, budget)
+
+    def _apply_constitution_ranking(self, results: List[RecallResult]) -> List[RecallResult]:
+        if not self.store:
+            return results
+
+        import time
+        now = time.time()
+        for r in results:
+            cell = self.store.get_cell(r.cell_id)
+            if cell:
+                priority = self._constitution.get_priority(cell.get("cell_type", "fact"))
+                r.score += priority * 0.02
+
+                if self._constitution.should_prefer_recent_high_confidence():
+                    age_days = (now - cell.get("created_at", now)) / 86400
+                    recency = max(0, 1.0 - (age_days / 30))
+                    confidence = cell.get("metadata", {}).get("confidence", 0.5)
+                    r.score += recency * 0.1 + confidence * 0.05
+
+        results.sort(key=lambda x: x.score, reverse=True)
+        return results
 
     def _apply_budget(self, results: List[RecallResult], budget: int) -> List[RecallResult]:
         total_tokens = 0

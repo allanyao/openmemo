@@ -30,6 +30,7 @@ from openmemo.governance.conflict_detector import ConflictDetector
 from openmemo.governance.version_manager import VersionManager
 from openmemo.constitution.constitution_loader import load_constitution
 from openmemo.constitution.constitution_runtime import ConstitutionRuntime
+from openmemo.constitution.constitution_registry import ConstitutionRegistry
 
 
 class Memory:
@@ -68,6 +69,7 @@ class Memory:
             vector_store=self.vector_store,
             embed_fn=self.embed_fn,
             config=self._config.recall,
+            constitution=self.constitution,
         )
         self.reconstructor = ReconstructiveRecall(
             recall_engine=self.recall_engine,
@@ -82,8 +84,34 @@ class Memory:
             store=self.store,
             config=self._config.skill,
         )
-        self.conflict_detector = ConflictDetector(config=self._config.governance)
+        self.conflict_detector = ConflictDetector(
+            config=self._config.governance,
+            constitution=self.constitution,
+        )
         self.version_manager = VersionManager()
+        self._registry = ConstitutionRegistry()
+
+    # ─── Constitution Profile API ───
+
+    def load_profile(self, name: str) -> dict:
+        runtime = self._registry.switch(name)
+        self.constitution = runtime
+        self.recall_engine.set_constitution(runtime)
+        self.conflict_detector.set_constitution(runtime)
+        return {
+            "profile": name,
+            "status": "active",
+            "summary": runtime.summary(),
+        }
+
+    def list_profiles(self) -> list:
+        return self._registry.list_profiles()
+
+    def register_profile(self, name: str, config_dict: dict):
+        self._registry.register_from_dict(name, config_dict)
+
+    def active_profile(self) -> str:
+        return self._registry.active_name
 
     # ─── Core API 1: write_memory ───
 
@@ -104,7 +132,7 @@ class Memory:
             query, top_k=limit, budget=50000,
             agent_id=agent_id or None, scene=scene or None,
         )
-        return [
+        items = [
             {
                 "content": r.content,
                 "score": r.score,
@@ -112,6 +140,7 @@ class Memory:
             }
             for r in results
         ]
+        return items
 
     # ─── Core API 3: recall_context (most important) ───
 
@@ -137,17 +166,10 @@ class Memory:
                 ),
             }
 
-        effective_scene = scene
-        if not effective_scene and self.constitution and self.constitution.should_prefer_scene_local():
-            effective_scene = scene
-
         results = self.recall_engine.recall(
             query, top_k=limit, budget=2000,
-            agent_id=agent_id or None, scene=effective_scene or None,
+            agent_id=agent_id or None, scene=scene or None,
         )
-
-        if self.constitution and self.constitution.should_prefer_recent_high_confidence():
-            results = self._boost_by_constitution(results)
 
         for r in results:
             cell = self.store.get_cell(r.cell_id)
@@ -274,23 +296,6 @@ class Memory:
         }
 
     # ─── Internal implementations ───
-
-    def _boost_by_constitution(self, results) -> list:
-        import time
-        now = time.time()
-        boosted = []
-        for r in results:
-            cell = self.store.get_cell(r.cell_id)
-            if cell:
-                age_days = (now - cell.get("created_at", now)) / 86400
-                confidence = cell.get("metadata", {}).get("confidence", 0.5)
-                recency_boost = max(0, 1.0 - (age_days / 30))
-                confidence_boost = confidence * 0.1
-                priority_boost = self.constitution.get_priority(cell.get("cell_type", "fact")) * 0.02
-                r.score += recency_boost * 0.1 + confidence_boost + priority_boost
-            boosted.append(r)
-        boosted.sort(key=lambda x: x.score, reverse=True)
-        return boosted
 
     def _write_impl(self, content: str, scene: str, cell_type: str,
                     confidence: float, agent_id: str,
@@ -453,11 +458,26 @@ class Memory:
         remaining_cells = self.store.list_cells(limit=500)
         merge_result = self._governance_merge(remaining_cells)
         skills = self.skill_engine.extract_skills()
+
+        promoted = 0
+        if self.constitution:
+            for c in remaining_cells:
+                cell_obj = MemCell.from_dict(c)
+                access = cell_obj.access_count
+                success = c.get("metadata", {}).get("success_signals", 0)
+                if (cell_obj.stage != LifecycleStage.MASTERY and
+                        self.constitution.can_promote(access, success)):
+                    cell_obj.stage = LifecycleStage.MASTERY
+                    cell_obj.importance = min(1.0, cell_obj.importance * 1.1)
+                    self.store.put_cell(cell_obj.to_dict())
+                    promoted += 1
+
         return {
             "operation": "cleanup",
             "duplicates_removed": dedupe_result["duplicates_removed"],
             "pyramid": merge_result["pyramid"],
             "new_skills": len(skills),
+            "promoted": promoted,
             "total_cells": len(remaining_cells),
         }
 

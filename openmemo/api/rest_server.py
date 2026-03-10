@@ -160,6 +160,30 @@ def create_app(db_path: str = None, config: OpenMemoConfig = None) -> Flask:
             return jsonify(memory.constitution.summary())
         return jsonify({"error": "constitution not enabled"}), 404
 
+    @app.route("/constitution/profiles", methods=["GET"])
+    def list_profiles():
+        profiles = memory.list_profiles()
+        return jsonify({"profiles": profiles, "active": memory.active_profile()})
+
+    @app.route("/constitution/switch", methods=["POST"])
+    def switch_profile():
+        data = request.get_json()
+        if not data or "profile" not in data:
+            return jsonify({"error": "profile name is required"}), 400
+        try:
+            result = memory.load_profile(data["profile"])
+            return jsonify(result)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 404
+
+    @app.route("/constitution/register", methods=["POST"])
+    def register_profile():
+        data = request.get_json()
+        if not data or "name" not in data or "config" not in data:
+            return jsonify({"error": "name and config are required"}), 400
+        memory.register_profile(data["name"], data["config"])
+        return jsonify({"status": "registered", "profile": data["name"]}), 201
+
     @app.route("/memory/<memory_id>", methods=["DELETE"])
     def delete_memory(memory_id):
         deleted = memory.delete(memory_id)

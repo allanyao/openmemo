@@ -8,7 +8,7 @@ Detection rules are fully encapsulated within strategy implementations.
 
 import time
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List
 from dataclasses import dataclass, field
 
 
@@ -61,23 +61,40 @@ class DefaultConflictStrategy(ConflictStrategy):
 
 
 class ConflictDetector:
-    def __init__(self, strategy: ConflictStrategy = None, config=None):
+    def __init__(self, strategy: ConflictStrategy = None, config=None,
+                 constitution=None):
         self._strategy = strategy or DefaultConflictStrategy(config=config)
         self._conflicts = []
+        self._constitution = constitution
+
+    def set_constitution(self, constitution):
+        self._constitution = constitution
 
     def detect(self, new_cell: dict, existing_cells: List[dict]) -> List[Conflict]:
         new_content = new_cell.get("content", "")
+        new_confidence = new_cell.get("metadata", {}).get("confidence", 0.5)
         conflicts = []
 
         for cell in existing_cells:
             existing_content = cell.get("content", "")
             if self._strategy.is_conflicting(new_content, existing_content):
+                old_confidence = cell.get("metadata", {}).get("confidence", 0.5)
+
+                auto_resolved = False
+                resolution = ""
+                if self._constitution:
+                    if self._constitution.allow_conflict_override(old_confidence, new_confidence):
+                        auto_resolved = True
+                        resolution = "constitution_override"
+
                 conflict = Conflict(
                     id=f"conflict_{len(self._conflicts)}",
                     cell_id_a=new_cell.get("id", ""),
                     cell_id_b=cell.get("id", ""),
                     content_a=new_content,
                     content_b=existing_content,
+                    resolved=auto_resolved,
+                    resolution=resolution,
                 )
                 conflicts.append(conflict)
                 self._conflicts.append(conflict)
