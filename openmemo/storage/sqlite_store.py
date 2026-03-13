@@ -3,10 +3,14 @@ SQLite storage backend - the default store.
 
 Stores notes, MemCells, MemScenes, skills, agents, conversations,
 and memory edges in a local SQLite database. Zero configuration, works out of the box.
+
+Thread-safety: Each thread gets its own SQLite connection via threading.local().
+WAL mode is enabled so readers and writers don't block each other.
 """
 
 import json
 import sqlite3
+import threading
 import time
 from typing import List, Optional
 from openmemo.storage.base_store import BaseStore
@@ -15,9 +19,20 @@ from openmemo.storage.base_store import BaseStore
 class SQLiteStore(BaseStore):
     def __init__(self, db_path: str = "openmemo.db", check_same_thread: bool = True):
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path, check_same_thread=check_same_thread)
-        self.conn.row_factory = sqlite3.Row
+        self._local = threading.local()
         self._create_tables()
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """Return a thread-local SQLite connection, creating one if needed."""
+        if not hasattr(self._local, "conn") or self._local.conn is None:
+            c = sqlite3.connect(self.db_path, check_same_thread=False)
+            c.row_factory = sqlite3.Row
+            c.execute("PRAGMA journal_mode=WAL")
+            c.execute("PRAGMA synchronous=NORMAL")
+            c.execute("PRAGMA foreign_keys=ON")
+            self._local.conn = c
+        return self._local.conn
 
     def _create_tables(self):
         cursor = self.conn.cursor()
@@ -70,10 +85,26 @@ class SQLiteStore(BaseStore):
                 name TEXT,
                 description TEXT,
                 pattern TEXT,
+                scene TEXT DEFAULT '',
+                trigger TEXT DEFAULT '',
+                steps TEXT DEFAULT '[]',
+                tools TEXT DEFAULT '[]',
+                confidence REAL DEFAULT 0.0,
                 usage_count INTEGER DEFAULT 0,
                 success_rate REAL DEFAULT 0.0,
+                skill_version INTEGER DEFAULT 1,
+                status TEXT DEFAULT 'active',
                 created_at REAL,
+                updated_at REAL,
                 metadata TEXT DEFAULT '{}'
+            );
+
+            CREATE TABLE IF NOT EXISTS skill_feedback (
+                feedback_id TEXT PRIMARY KEY,
+                skill_id TEXT,
+                result TEXT DEFAULT '',
+                success INTEGER DEFAULT 0,
+                timestamp REAL
             );
 
             CREATE TABLE IF NOT EXISTS pyramid (
@@ -126,21 +157,44 @@ class SQLiteStore(BaseStore):
             ("cells", "scope", "TEXT DEFAULT 'private'"),
             ("cells", "conversation_id", "TEXT DEFAULT ''"),
             ("scenes", "agent_id", "TEXT DEFAULT ''"),
+            ("notes", "team_id", "TEXT DEFAULT ''"),
+            ("notes", "task_id", "TEXT DEFAULT ''"),
+            ("cells", "team_id", "TEXT DEFAULT ''"),
+            ("cells", "task_id", "TEXT DEFAULT ''"),
+            ("skills", "scene", "TEXT DEFAULT ''"),
+            ("skills", "trigger", "TEXT DEFAULT ''"),
+            ("skills", "steps", "TEXT DEFAULT '[]'"),
+            ("skills", "tools", "TEXT DEFAULT '[]'"),
+            ("skills", "confidence", "REAL DEFAULT 0.0"),
+            ("skills", "skill_version", "INTEGER DEFAULT 1"),
+            ("skills", "status", "TEXT DEFAULT 'active'"),
+            ("skills", "updated_at", "REAL"),
         ]:
             try:
                 cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_def}")
             except sqlite3.OperationalError:
                 pass
+
+        cursor.executescript("""
+            CREATE TABLE IF NOT EXISTS skill_feedback (
+                feedback_id TEXT PRIMARY KEY,
+                skill_id TEXT,
+                result TEXT DEFAULT '',
+                success INTEGER DEFAULT 0,
+                timestamp REAL
+            );
+        """)
         self.conn.commit()
 
     def put_note(self, note: dict) -> str:
         note_id = note.get("id", "")
         cursor = self.conn.cursor()
         cursor.execute(
-            "INSERT OR REPLACE INTO notes (id, content, source, agent_id, scene, scope, conversation_id, timestamp, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO notes (id, content, source, agent_id, scene, scope, conversation_id, team_id, task_id, timestamp, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (note_id, note.get("content", ""), note.get("source", "manual"),
              note.get("agent_id", ""), note.get("scene", ""),
              note.get("scope", "private"), note.get("conversation_id", ""),
+             note.get("team_id", ""), note.get("task_id", ""),
              note.get("timestamp", 0), json.dumps(note.get("metadata", {})))
         )
         self.conn.commit()
@@ -175,8 +229,9 @@ class SQLiteStore(BaseStore):
         cursor.execute(
             """INSERT OR REPLACE INTO cells
             (id, note_id, content, cell_type, facts, stage, importance, access_count,
-             last_accessed, created_at, agent_id, scene, scope, conversation_id, connections, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             last_accessed, created_at, agent_id, scene, scope, conversation_id,
+             team_id, task_id, connections, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (cell_id, cell.get("note_id", ""), cell.get("content", ""),
              cell.get("cell_type", "fact"),
              json.dumps(cell.get("facts", [])), cell.get("stage", "exploration"),
@@ -184,6 +239,7 @@ class SQLiteStore(BaseStore):
              cell.get("last_accessed", 0), cell.get("created_at", 0),
              cell.get("agent_id", ""), cell.get("scene", ""),
              cell.get("scope", "private"), cell.get("conversation_id", ""),
+             cell.get("team_id", ""), cell.get("task_id", ""),
              json.dumps(cell.get("connections", [])), json.dumps(cell.get("metadata", {})))
         )
         self.conn.commit()
@@ -215,7 +271,8 @@ class SQLiteStore(BaseStore):
         return [self._row_to_cell(row) for row in cursor.fetchall()]
 
     def list_cells_scoped(self, agent_id: str = None, conversation_id: str = None,
-                          scene: str = None, limit: int = 100) -> List[dict]:
+                          scene: str = None, limit: int = 100,
+                          team_id: str = None, task_id: str = None) -> List[dict]:
         cursor = self.conn.cursor()
         scope_conditions = []
         params = []
@@ -230,13 +287,25 @@ class SQLiteStore(BaseStore):
 
         scope_conditions.append("scope = 'shared'")
 
+        if team_id:
+            scope_conditions.append("(team_id = ? AND scope = 'team')")
+            params.append(team_id)
+        else:
+            scope_conditions.append("scope = 'team'")
+
         scope_clause = " OR ".join(scope_conditions)
 
+        extra_conditions = []
         if scene:
-            where = f" WHERE ({scope_clause}) AND scene = ?"
+            extra_conditions.append("scene = ?")
             params.append(scene)
-        else:
-            where = f" WHERE ({scope_clause})"
+        if task_id:
+            extra_conditions.append("(task_id = ? OR scope = 'team')")
+            params.append(task_id)
+
+        where = f" WHERE ({scope_clause})"
+        if extra_conditions:
+            where += " AND " + " AND ".join(extra_conditions)
 
         params.append(limit)
         cursor.execute(f"SELECT * FROM cells{where} ORDER BY created_at DESC LIMIT ?", params)
@@ -284,22 +353,92 @@ class SQLiteStore(BaseStore):
     def put_skill(self, skill: dict) -> str:
         skill_id = skill.get("id", "")
         cursor = self.conn.cursor()
+        steps = skill.get("steps", [])
+        tools = skill.get("tools", [])
         cursor.execute(
             """INSERT OR REPLACE INTO skills
-            (id, name, description, pattern, usage_count, success_rate, created_at, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (id, name, description, pattern, scene, trigger, steps, tools,
+             confidence, usage_count, success_rate, skill_version, status,
+             created_at, updated_at, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (skill_id, skill.get("name", ""), skill.get("description", ""),
-             skill.get("pattern", ""), skill.get("usage_count", 0),
-             skill.get("success_rate", 0.0), skill.get("created_at", 0),
+             skill.get("pattern", ""), skill.get("scene", ""),
+             skill.get("trigger", ""),
+             json.dumps(steps) if isinstance(steps, list) else steps,
+             json.dumps(tools) if isinstance(tools, list) else tools,
+             skill.get("confidence", 0.0),
+             skill.get("usage_count", 0), skill.get("success_rate", 0.0),
+             skill.get("skill_version", 1), skill.get("status", "active"),
+             skill.get("created_at", 0), skill.get("updated_at", 0),
              json.dumps(skill.get("metadata", {})))
         )
         self.conn.commit()
         return skill_id
 
-    def list_skills(self) -> List[dict]:
+    def get_skill(self, skill_id: str) -> Optional[dict]:
         cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM skills ORDER BY usage_count DESC")
+        cursor.execute("SELECT * FROM skills WHERE id = ?", (skill_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return self._row_to_skill(row)
+
+    def list_skills(self, scene: str = "", status: str = "") -> List[dict]:
+        cursor = self.conn.cursor()
+        conditions = []
+        params = []
+        if scene:
+            conditions.append("scene = ?")
+            params.append(scene)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+
+        query = "SELECT * FROM skills"
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY usage_count DESC"
+        cursor.execute(query, params)
         return [self._row_to_skill(row) for row in cursor.fetchall()]
+
+    def delete_skill(self, skill_id: str) -> bool:
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM skills WHERE id = ?", (skill_id,))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def put_skill_feedback(self, feedback: dict) -> str:
+        fid = feedback.get("feedback_id", "")
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """INSERT OR REPLACE INTO skill_feedback
+            (feedback_id, skill_id, result, success, timestamp)
+            VALUES (?, ?, ?, ?, ?)""",
+            (fid, feedback.get("skill_id", ""), feedback.get("result", ""),
+             1 if feedback.get("success") else 0,
+             feedback.get("timestamp", 0))
+        )
+        self.conn.commit()
+        return fid
+
+    def list_skill_feedback(self, skill_id: str = "") -> List[dict]:
+        cursor = self.conn.cursor()
+        if skill_id:
+            cursor.execute(
+                "SELECT * FROM skill_feedback WHERE skill_id = ? ORDER BY timestamp DESC",
+                (skill_id,))
+        else:
+            cursor.execute("SELECT * FROM skill_feedback ORDER BY timestamp DESC")
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                "feedback_id": row["feedback_id"],
+                "skill_id": row["skill_id"],
+                "result": row["result"],
+                "success": bool(row["success"]),
+                "timestamp": row["timestamp"],
+            })
+        return results
 
     def put_agent(self, agent: dict) -> str:
         agent_id = agent.get("agent_id", "")
@@ -402,7 +541,9 @@ class SQLiteStore(BaseStore):
         return [self._row_to_edge(row) for row in cursor.fetchall()]
 
     def close(self):
-        self.conn.close()
+        if hasattr(self._local, "conn") and self._local.conn is not None:
+            self._local.conn.close()
+            self._local.conn = None
 
     def _row_to_edge(self, row) -> dict:
         return {
@@ -432,6 +573,12 @@ class SQLiteStore(BaseStore):
         except (IndexError, KeyError):
             d["scope"] = "private"
             d["conversation_id"] = ""
+        try:
+            d["team_id"] = row["team_id"] or ""
+            d["task_id"] = row["task_id"] or ""
+        except (IndexError, KeyError):
+            d["team_id"] = ""
+            d["task_id"] = ""
         return d
 
     def _row_to_cell(self, row) -> dict:
@@ -457,6 +604,12 @@ class SQLiteStore(BaseStore):
         except (IndexError, KeyError):
             d["scope"] = "private"
             d["conversation_id"] = ""
+        try:
+            d["team_id"] = row["team_id"] or ""
+            d["task_id"] = row["task_id"] or ""
+        except (IndexError, KeyError):
+            d["team_id"] = ""
+            d["task_id"] = ""
         return d
 
     def _row_to_scene(self, row) -> dict:
@@ -473,9 +626,21 @@ class SQLiteStore(BaseStore):
         return d
 
     def _row_to_skill(self, row) -> dict:
+        steps_raw = row["steps"] if "steps" in row.keys() else "[]"
+        tools_raw = row["tools"] if "tools" in row.keys() else "[]"
         return {
             "id": row["id"], "name": row["name"], "description": row["description"],
-            "pattern": row["pattern"], "usage_count": row["usage_count"],
-            "success_rate": row["success_rate"], "created_at": row["created_at"],
+            "pattern": row["pattern"],
+            "scene": row["scene"] if "scene" in row.keys() else "",
+            "trigger": row["trigger"] if "trigger" in row.keys() else "",
+            "steps": json.loads(steps_raw) if isinstance(steps_raw, str) else steps_raw,
+            "tools": json.loads(tools_raw) if isinstance(tools_raw, str) else tools_raw,
+            "confidence": row["confidence"] if "confidence" in row.keys() else 0.0,
+            "usage_count": row["usage_count"],
+            "success_rate": row["success_rate"],
+            "skill_version": row["skill_version"] if "skill_version" in row.keys() else 1,
+            "status": row["status"] if "status" in row.keys() else "active",
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"] if "updated_at" in row.keys() else 0,
             "metadata": json.loads(row["metadata"] or "{}"),
         }

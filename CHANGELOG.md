@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 This project is licensed under AGPLv3.
 
+## [0.11.1] - 2026-03-13
+
+### Fixed
+- **Critical crash fix**: `SQLiteStore` now uses thread-local connections (`threading.local()`)
+  instead of a shared `self.conn`. This eliminates `EXC_BAD_ACCESS (SIGSEGV)` crashes that
+  occurred when Inspector panel polling, Sync Worker background threads, and agent write
+  operations accessed the same SQLite connection concurrently.
+- Enabled WAL (Write-Ahead Logging) mode on all connections for better concurrent read/write
+  performance without blocking.
+- Verified fix with concurrent 6-thread stress test (2 writers + 3 readers + 1 inspector poller).
+
 ## [0.1.0] - 2026-03-06
 
 ### Added
